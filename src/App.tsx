@@ -434,12 +434,15 @@ function App() {
     const productId = String(form.get('productId'));
     const storeId = String(form.get('storeId'));
     const price = Number(form.get('price'));
+    const quantity = Number(form.get('quantity'));
     if (!productId || !storeId || !price) return;
     const { error } = await supabase.from('price_records').insert({
       group_id: activeGroup.id,
       product_id: productId,
       store_id: storeId,
       price,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : null,
+      unit: String(form.get('unit') ?? '').trim() || null,
       memo: String(form.get('memo') ?? '').trim() || null,
       recorded_by: user.id,
       recorded_at: String(form.get('recordedAt') || new Date().toISOString()),
@@ -458,8 +461,16 @@ function App() {
     if (!supabase) return;
     const price = Number(window.prompt('価格', String(record.price)));
     if (!price) return;
+    const quantityInput = window.prompt('数量', record.quantity ? String(record.quantity) : '')?.trim() ?? '';
+    const unit = window.prompt('単位', record.unit ?? '')?.trim() || null;
     const memo = window.prompt('メモ', record.memo ?? '')?.trim() || null;
-    const { error } = await supabase.from('price_records').update({ price, memo }).eq('id', record.id);
+    const quantity = Number(quantityInput);
+    const { error } = await supabase.from('price_records').update({
+      price,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : null,
+      unit,
+      memo,
+    }).eq('id', record.id);
     if (error) setStatus(error.message);
     else {
       await refreshActiveGroupData(record.group_id);
@@ -578,7 +589,7 @@ function App() {
           <ProductManager products={filteredProducts} addProduct={addProduct} updateProduct={updateProduct} deleteProduct={deleteProduct} />
         )}
         {activeTab === 'stores' && (
-          <StoreManager stores={stores} addStore={addStore} updateStore={updateStore} deleteStore={deleteStore} />
+          <StoreManager stores={stores} products={products} records={records} addStore={addStore} updateStore={updateStore} deleteStore={deleteStore} />
         )}
         {activeTab === 'groups' && (
           <GroupManager groups={groups} members={members} profiles={profiles} invites={invites} activeGroupId={selectedGroupId} isCreatingGroup={isCreatingGroup} deletingGroupIds={deletingGroupIds} createGroup={createGroup} updateGroup={updateGroup} deleteGroup={deleteGroup} inviteMember={inviteMember} setActiveGroupId={setActiveGroupId} profile={profile} />
@@ -740,11 +751,15 @@ function ProductManager({
 
 function StoreManager({
   stores,
+  products,
+  records,
   addStore,
   updateStore,
   deleteStore,
 }: {
   stores: StoreRow[];
+  products: ProductRow[];
+  records: PriceRecordRow[];
   addStore: (event: FormEvent<HTMLFormElement>) => void;
   updateStore: (store: StoreRow) => void;
   deleteStore: (id: string) => void;
@@ -759,15 +774,29 @@ function StoreManager({
         <button type="submit">店舗を追加</button>
       </form>
       <div className="list">
-        {stores.map((store) => (
-          <div className="list-row" key={store.id}>
-            <div><strong>{store.name}</strong><span>{store.store_type || '店舗'} / {store.address ?? '住所未登録'}</span></div>
-            <div className="row-actions">
-              <button className="ghost-button" type="button" onClick={() => updateStore(store)}>編集</button>
-              <button className="ghost-button" type="button" onClick={() => deleteStore(store.id)}>削除</button>
+        {stores.map((store) => {
+          const storeRecords = latestRecordsForStore(records, store.id);
+          return (
+            <div className="store-card" key={store.id}>
+              <div className="list-row">
+                <div><strong>{store.name}</strong><span>{store.store_type || '店舗'} / {store.address ?? '住所未登録'}</span></div>
+                <div className="row-actions">
+                  <button className="ghost-button" type="button" onClick={() => updateStore(store)}>編集</button>
+                  <button className="ghost-button" type="button" onClick={() => deleteStore(store.id)}>削除</button>
+                </div>
+              </div>
+              <div className="store-price-list">
+                {storeRecords.map((record) => (
+                  <div className="store-price-row" key={record.id}>
+                    <span>{store.name} / {productLabel(products, record.product_id)}</span>
+                    <strong>{currency.format(record.price)}</strong>
+                  </div>
+                ))}
+                {storeRecords.length === 0 && <span className="muted-text">この店舗の価格記録はまだありません。</span>}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -795,6 +824,8 @@ function RecordForm({
         <label>商品<select name="productId" defaultValue={selectedProductId}>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
         <label>店舗<select name="storeId">{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
         <label>価格<input name="price" type="number" inputMode="numeric" min="1" placeholder="178" required /></label>
+        <label>数量<input name="quantity" type="number" inputMode="decimal" min="0" step="0.01" placeholder="1000" /></label>
+        <label>単位<input name="unit" placeholder="ml / g / 個" /></label>
         <label>記録日<input name="recordedAt" type="datetime-local" /></label>
         <label className="wide">メモ<textarea name="memo" rows={3} placeholder="特売、1人1パックまで、夕方には売り切れなど" /></label>
         <button type="submit">価格を保存</button>
@@ -825,8 +856,8 @@ function Comparison({
         {rows.map((record, index) => (
           <article className={`price-row ${index === 0 ? 'cheapest' : ''}`} key={record.id}>
             <div>
-              <h3>{storeName(stores, record.store_id)}</h3>
-              <p>{freshnessLabel(record.updated_at)} / {relativeTime(record.updated_at)}</p>
+              <h3>{storeName(stores, record.store_id)} / {productLabel(products, record.product_id)}</h3>
+              <p>{recordAmount(record) || freshnessLabel(record.updated_at)} / {relativeTime(record.updated_at)}</p>
             </div>
             <div className="price-stack"><strong>{currency.format(record.price)}</strong>{record.memo && <span>{record.memo}</span>}</div>
           </article>
@@ -865,12 +896,13 @@ function History({
         {history.map((record) => (
           <article className="history-row" key={record.id}>
             <div>
-              <div className="row-title">{storeName(stores, record.store_id)} / {currency.format(record.price)}</div>
+              <div className="row-title">{storeName(stores, record.store_id)} / {productLabel(products, record.product_id)} / {currency.format(record.price)}</div>
               <div className="row-prices">
                 <span>{relativeTime(record.updated_at)}更新</span>
                 <span className={`freshness ${freshnessLevel(record.updated_at)}`}>{freshnessLabel(record.updated_at)}</span>
               </div>
               <p>{profileName(profiles, record.recorded_by)}が登録</p>
+              {recordAmount(record) && <p>{recordAmount(record)}</p>}
               {record.memo && <p>{record.memo}</p>}
             </div>
             <div className="row-actions">
@@ -1039,8 +1071,30 @@ function latestRecordsForProduct(records: PriceRecordRow[], productId: string) {
   return Array.from(latest.values()).sort((a, b) => a.price - b.price);
 }
 
+function latestRecordsForStore(records: PriceRecordRow[], storeId: string) {
+  const latest = new Map<string, PriceRecordRow>();
+  records
+    .filter((record) => record.store_id === storeId)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .forEach((record) => {
+      if (!latest.has(record.product_id)) latest.set(record.product_id, record);
+    });
+  return Array.from(latest.values()).sort((a, b) => a.price - b.price);
+}
+
 function storeName(stores: StoreRow[], storeId: string) {
   return stores.find((store) => store.id === storeId)?.name ?? '未登録の店舗';
+}
+
+function productLabel(products: ProductRow[], productId: string) {
+  const product = products.find((item) => item.id === productId);
+  if (!product) return '未登録の商品';
+  return [product.name, product.amount].filter(Boolean).join(' ');
+}
+
+function recordAmount(record: PriceRecordRow) {
+  if (!record.quantity && !record.unit) return '';
+  return [record.quantity ?? '', record.unit ?? ''].join('').trim();
 }
 
 function profileName(profiles: ProfileRow[], userId: string) {

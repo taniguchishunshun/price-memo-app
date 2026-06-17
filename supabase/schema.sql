@@ -64,12 +64,17 @@ create table if not exists public.price_records (
   product_id uuid not null references public.products(id) on delete cascade,
   store_id uuid not null references public.stores(id) on delete cascade,
   price integer not null check (price >= 0),
+  quantity numeric,
+  unit text,
   memo text,
   recorded_by uuid not null references public.profiles(id) on delete cascade,
   recorded_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table public.price_records add column if not exists quantity numeric;
+alter table public.price_records add column if not exists unit text;
 
 create table if not exists public.shopping_lists (
   id uuid primary key default gen_random_uuid(),
@@ -103,6 +108,38 @@ drop trigger if exists set_price_records_updated_at on public.price_records;
 create trigger set_price_records_updated_at
 before update on public.price_records
 for each row execute function public.set_updated_at();
+
+create or replace function public.ensure_price_record_group_match()
+returns trigger
+language plpgsql
+as $$
+declare
+  product_group_id uuid;
+  store_group_id uuid;
+begin
+  select group_id into product_group_id from public.products where id = new.product_id;
+  select group_id into store_group_id from public.stores where id = new.store_id;
+
+  if product_group_id is null then
+    raise exception 'product_id % does not exist', new.product_id;
+  end if;
+
+  if store_group_id is null then
+    raise exception 'store_id % does not exist', new.store_id;
+  end if;
+
+  if new.group_id <> product_group_id or new.group_id <> store_group_id then
+    raise exception 'price_records group_id must match products.group_id and stores.group_id';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists ensure_price_records_group_match on public.price_records;
+create trigger ensure_price_records_group_match
+before insert or update of group_id, product_id, store_id on public.price_records
+for each row execute function public.ensure_price_record_group_match();
 
 create or replace function public.handle_new_user()
 returns trigger

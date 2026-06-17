@@ -161,6 +161,8 @@ export type Database = {
           product_id: string;
           store_id: string;
           price: number;
+          quantity: number | null;
+          unit: string | null;
           memo: string | null;
           recorded_by: string;
           recorded_at: string;
@@ -173,6 +175,8 @@ export type Database = {
           product_id: string;
           store_id: string;
           price: number;
+          quantity?: number | null;
+          unit?: string | null;
           memo?: string | null;
           recorded_by: string;
           recorded_at?: string;
@@ -181,6 +185,8 @@ export type Database = {
         };
         Update: {
           price?: number;
+          quantity?: number | null;
+          unit?: string | null;
           memo?: string | null;
           store_id?: string;
           product_id?: string;

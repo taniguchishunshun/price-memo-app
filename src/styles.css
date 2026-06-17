@@ -294,6 +294,45 @@ p {
   padding: 12px;
 }
 
+.store-card {
+  display: grid;
+  gap: 10px;
+  border-radius: 8px;
+  background: #f5efe2;
+  padding: 12px;
+}
+
+.store-card .list-row {
+  padding: 0;
+}
+
+.store-price-list {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #e1d5bf;
+  padding-top: 10px;
+}
+
+.store-price-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.store-price-row span {
+  color: #5a5143;
+}
+
+.store-price-row strong {
+  white-space: nowrap;
+}
+
+.muted-text {
+  color: #716654;
+  font-size: 0.88rem;
+}
+
 .group-row {
   width: 100%;
   min-height: 64px;
