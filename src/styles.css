@@ -111,7 +111,8 @@ p {
   white-space: nowrap;
 }
 
-.search-band {
+.search-band,
+.group-band {
   display: grid;
   gap: 8px;
   margin-bottom: 16px;
@@ -119,6 +120,17 @@ p {
   border: 1px solid #e5dcc9;
   border-radius: 8px;
   background: #fffdf8;
+}
+
+.group-band p {
+  color: #716654;
+  font-size: 0.88rem;
+}
+
+.group-selector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .stack,
@@ -223,11 +235,47 @@ p {
 }
 
 .list-row,
+.group-row,
 .price-row,
 .history-row {
   border-radius: 8px;
   background: #f5efe2;
   padding: 12px;
+}
+
+.group-row {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #24211c;
+  text-align: left;
+}
+
+.group-row.active {
+  outline: 2px solid #235347;
+  background: #eef5ef;
+}
+
+.group-row span {
+  display: grid;
+  gap: 3px;
+}
+
+.group-row small {
+  color: #716654;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.group-row em {
+  color: #235347;
+  font-size: 0.82rem;
+  font-style: normal;
+  font-weight: 800;
+  text-align: right;
 }
 
 .list-row div {
@@ -305,7 +353,7 @@ p {
   left: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, minmax(48px, 1fr));
   gap: 4px;
   border-top: 1px solid #ddd4c4;
   background: rgba(255, 253, 248, 0.96);

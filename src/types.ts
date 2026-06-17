@@ -1,5 +1,6 @@
 export type Item = {
   id: string;
+  groupId?: string;
   name: string;
   category: string;
   amount: string;
@@ -7,12 +8,14 @@ export type Item = {
 
 export type Store = {
   id: string;
+  groupId?: string;
   name: string;
   type: string;
 };
 
 export type PriceRecord = {
   id: string;
+  groupId?: string;
   itemId: string;
   storeId: string;
   normalPrice: number;
@@ -23,6 +26,13 @@ export type PriceRecord = {
   memo: string;
 };
 
+export type SharedGroup = {
+  id: string;
+  name: string;
+  area: string;
+  sharedWith: string;
+};
+
 export type ActiveTab =
   | 'dashboard'
   | 'items'
@@ -30,12 +40,15 @@ export type ActiveTab =
   | 'records'
   | 'compare'
   | 'history'
+  | 'groups'
   | 'backup';
 
 export type AppBackup = {
   app: 'price-memo-app';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
+  groups?: SharedGroup[];
+  activeGroupId?: string;
   items: Item[];
   stores: Store[];
   records: PriceRecord[];
