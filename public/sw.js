@@ -1,4 +1,4 @@
-const CACHE_NAME = 'price-memo-app-v1';
+const CACHE_NAME = 'price-memo-app-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -19,10 +19,22 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put('./', responseToCache));
+          return response;
+        })
+        .catch(() => caches.match('./')),
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
-
       return fetch(event.request)
         .then((response) => {
           const responseToCache = response.clone();

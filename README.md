@@ -20,8 +20,8 @@
 - TypeScript
 - Vite
 - 通常のCSS
-- localStorage保存
-- 外部API、外部データベースなし
+- Supabase Authentication
+- Supabase Database / Realtime / Storage
 
 ## セットアップ
 
@@ -30,7 +30,23 @@ pnpm install
 pnpm dev
 ```
 
-ブラウザで表示されたURLを開いてください。通常は `http://localhost:5173/` です。
+ブラウザで表示されたURLを開いてください。通常は `http://localhost:5173/price-memo-app/` です。
+
+## iPhoneでローカル開発版を見る
+
+MacとiPhoneを同じWi-Fiにつないだうえで、Mac側で以下を実行します。
+
+```bash
+pnpm dev:host
+```
+
+表示された `Network` のURLをiPhoneのSafariで開いてください。
+
+```text
+http://MacのIPアドレス:5173/price-memo-app/
+```
+
+iPhoneで `localhost` を開くと、MacではなくiPhone自身を見に行くため、ローカル開発中のアプリには接続できません。
 
 ## Supabaseセットアップ
 
@@ -45,10 +61,13 @@ VITE_SUPABASE_ANON_KEY=Supabaseのanon key
 3. GitHub Pagesで公開する場合は、GitHubリポジトリの `Settings > Secrets and variables > Actions` に以下を登録します。
 
 ```text
+VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 ```
 
 anon keyは公開フロントエンドで使う前提のキーですが、リポジトリには直接コミットしないでください。データ保護はSupabaseのRLSで行います。
+
+`.env` を作成・変更した後は、開発サーバーを一度止めてから再起動してください。
 
 ## ビルド
 
@@ -66,6 +85,20 @@ https://taniguchishunshun.github.io/price-memo-app/
 
 `main` ブランチへpushすると、GitHub Actionsが自動でビルドしてGitHub Pagesへ反映します。
 
+GitHub側では、リポジトリの `Settings > Pages` で `Build and deployment` の `Source` を `GitHub Actions` にしてください。
+
+Supabase側では、`Authentication > URL Configuration` に以下を設定してください。
+
+```text
+Site URL:
+https://taniguchishunshun.github.io/price-memo-app/
+
+Redirect URLs:
+https://taniguchishunshun.github.io/price-memo-app/
+http://localhost:5173/price-memo-app/
+http://127.0.0.1:5173/price-memo-app/
+```
+
 ## iPhoneでアプリのように使う
 
 1. iPhoneのSafariで公開URLを開きます。
@@ -73,7 +106,7 @@ https://taniguchishunshun.github.io/price-memo-app/
 3. 「ホーム画面に追加」を選びます。
 4. ホーム画面の「価格メモ」アイコンから開きます。
 
-データは端末ごとのブラウザに保存されます。家族それぞれの入力内容は自動同期されません。
+データはSupabaseに保存されます。同じ共有グループに参加している家族やパートナーの端末へ同期されます。
 
 ## 共有グループとエリア
 
@@ -84,7 +117,7 @@ https://taniguchishunshun.github.io/price-memo-app/
 
 「共有」画面から、新しいグループを追加できます。商品・店舗・価格記録は選択中のグループに保存されるため、彼女と使う京都のデータ、実家の家族に渡す三重のデータを分けて管理できます。
 
-現時点では、グループは端末内で分かれるだけです。家族や彼女とリアルタイムに同じデータを編集するには、次の段階でクラウド保存と招待機能を追加します。
+グループごとに商品・店舗・価格記録が分かれます。「京都の生活」をパートナーと共有し、「三重の実家」を家族と共有するように使えます。
 
 ## データを失わないためのバックアップ
 
@@ -93,9 +126,7 @@ https://taniguchishunshun.github.io/price-memo-app/
 - 「バックアップをダウンロード」：商品・店舗・価格記録をファイルに保存
 - 「バックアップから復元」：保存したJSONファイルからデータを復元
 
-長期利用する場合は、月1回や大きく入力した後にバックアップを作成し、iCloud DriveやGoogle Driveなどにも保管してください。
-
-家族全員で同じデータをリアルタイム共有したい場合は、localStorageではなくクラウド保存機能が必要です。
+長期利用する場合でもデータはSupabaseに保存されます。大きく入力した後にバックアップを作成しておくと、手元にも控えを残せます。
 
 ## 使い方
 
@@ -110,6 +141,6 @@ https://taniguchishunshun.github.io/price-memo-app/
 
 ## データ保存について
 
-入力したデータはブラウザの `localStorage` に保存されます。ログインは不要で、ブラウザを閉じてもデータは保持されます。
+入力したデータはSupabaseに保存されます。ブラウザを閉じても、別の端末でログインしてもデータを確認できます。
 
-ただし、別のブラウザや別の端末には自動同期されません。ブラウザのサイトデータを削除すると、登録内容も消えます。
+ログイン情報はブラウザに保存されます。共有端末では使い終わったあとにログアウトしてください。

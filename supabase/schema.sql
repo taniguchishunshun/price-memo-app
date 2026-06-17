@@ -174,7 +174,7 @@ create policy "profiles_insert_own" on public.profiles
   for insert to authenticated with check (id = auth.uid());
 
 create policy "groups_select_members" on public.groups
-  for select to authenticated using (public.is_group_member(id));
+  for select to authenticated using (public.is_group_member(id) or created_by = auth.uid());
 create policy "groups_insert_own" on public.groups
   for insert to authenticated with check (created_by = auth.uid());
 create policy "groups_update_admin" on public.groups

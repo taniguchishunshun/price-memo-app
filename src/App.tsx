@@ -94,7 +94,22 @@ function App() {
     if (!supabase) return;
 
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
-    setProfile((profileRow as ProfileRow | null) ?? null);
+    const currentProfile = profileRow as ProfileRow | null;
+    if (!currentProfile) {
+      const displayName = currentUser.user_metadata.display_name ?? currentUser.email?.split('@')[0] ?? 'ユーザー';
+      const { data: createdProfile, error: profileError } = await supabase
+        .from('profiles')
+        .upsert({ id: currentUser.id, display_name: displayName, avatar_url: null })
+        .select()
+        .single();
+      if (profileError) {
+        setStatus(profileError.message);
+        return;
+      }
+      setProfile(createdProfile as ProfileRow);
+    } else {
+      setProfile(currentProfile);
+    }
 
     const { data: groupRows, error } = await supabase.from('groups').select('*').order('created_at', { ascending: true });
     if (error) {
@@ -183,17 +198,23 @@ function App() {
     const area = String(form.get('area') ?? '').trim();
     if (!name || !area) return;
 
-    const { data: groupRow, error } = await supabase
+    const groupId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const group: GroupRow = {
+      id: groupId,
+      name,
+      area,
+      created_by: user.id,
+      created_at: createdAt,
+    };
+    const { error } = await supabase
       .from('groups')
-      .insert({ name, area, created_by: user.id })
-      .select()
-      .single();
+      .insert({ id: groupId, name, area, created_by: user.id, created_at: createdAt });
     if (error) {
       setStatus(error.message);
       return;
     }
 
-    const group = groupRow as GroupRow;
     const { error: memberError } = await supabase.from('group_members').insert({ group_id: group.id, user_id: user.id, role: 'owner' });
     if (memberError) {
       setStatus(memberError.message);
