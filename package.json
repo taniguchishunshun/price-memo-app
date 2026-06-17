@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:host": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/verify-env.mjs && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
