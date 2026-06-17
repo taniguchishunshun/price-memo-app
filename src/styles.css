@@ -41,6 +41,13 @@ button {
   cursor: pointer;
 }
 
+button:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 input,
 select,
 textarea {
@@ -75,7 +82,7 @@ p {
 .app-shell {
   width: min(1100px, 100%);
   margin: 0 auto;
-  padding: 18px 14px 96px;
+  padding: 18px 14px calc(124px + env(safe-area-inset-bottom));
 }
 
 .app-header {
@@ -131,6 +138,38 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.group-chip-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.group-chip-list button {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: 128px;
+  min-height: 50px;
+  border: 1px solid #b8cabf;
+  background: #fff;
+  color: #235347;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.group-chip-list button.active {
+  background: #235347;
+  color: #fff;
+}
+
+.group-chip-list small {
+  font-size: 0.76rem;
+  font-weight: 700;
+  opacity: 0.82;
 }
 
 .stack,
@@ -276,6 +315,17 @@ p {
   gap: 3px;
 }
 
+.group-select-button {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 3px;
+  min-height: 44px;
+  background: transparent;
+  color: #24211c;
+  padding: 0;
+  text-align: left;
+}
+
 .group-row small {
   color: #716654;
   font-size: 0.82rem;
@@ -353,6 +403,39 @@ p {
   padding: 10px 12px;
 }
 
+.toast {
+  position: fixed;
+  right: 14px;
+  bottom: calc(90px + env(safe-area-inset-bottom));
+  left: 14px;
+  z-index: 20;
+  margin: 0 auto;
+  width: min(420px, calc(100% - 28px));
+  border-radius: 8px;
+  background: #235347;
+  color: #fff;
+  font-weight: 800;
+  padding: 12px 14px;
+  text-align: center;
+  box-shadow: 0 12px 34px rgba(36, 33, 28, 0.22);
+}
+
+.loading-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.42);
+  border-top-color: #fff;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
 .freshness {
   border-radius: 999px;
   font-size: 0.78rem;
@@ -400,12 +483,12 @@ p {
   gap: 4px;
   border-top: 1px solid #ddd4c4;
   background: rgba(255, 253, 248, 0.96);
-  padding: 8px max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right));
+  padding: 8px max(8px, env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right));
   backdrop-filter: blur(12px);
 }
 
 .bottom-nav button {
-  min-height: 44px;
+  min-height: 48px;
   border-radius: 8px;
   background: transparent;
   color: #4f4639;
@@ -420,7 +503,7 @@ p {
 
 @media (min-width: 720px) {
   .app-shell {
-    padding: 28px 24px 110px;
+    padding: 28px 24px 120px;
   }
 
   .app-header h1 {
@@ -445,6 +528,12 @@ p {
     margin: 0 auto;
     border: 1px solid #ddd4c4;
     border-radius: 12px;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

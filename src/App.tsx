@@ -40,9 +40,14 @@ function App() {
   const [search, setSearch] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [status, setStatus] = useState('準備中');
+  const [toast, setToast] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [recentGroupCreationKey, setRecentGroupCreationKey] = useState('');
+  const [deletingGroupIds, setDeletingGroupIds] = useState<string[]>([]);
 
   const user = session?.user ?? null;
   const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null;
+  const selectedGroupId = activeGroupId || groups[0]?.id || '';
   const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return products;
@@ -70,6 +75,12 @@ function App() {
 
     loadAccount(user);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timerId = window.setTimeout(() => setToast(''), 3200);
+    return () => window.clearTimeout(timerId);
+  }, [toast]);
 
   useEffect(() => {
     if (!supabase || !user || !activeGroupId) return;
@@ -118,6 +129,11 @@ function App() {
     }
 
     const typedGroups = (groupRows ?? []) as GroupRow[];
+    console.info('[price-memo] groups loaded', {
+      count: typedGroups.length,
+      activeGroupId,
+      groupIds: typedGroups.map((group) => group.id),
+    });
     setGroups(typedGroups);
     const nextGroupId = activeGroupId && typedGroups.some((group) => group.id === activeGroupId) ? activeGroupId : typedGroups[0]?.id ?? '';
     setActiveGroupId(nextGroupId);
@@ -192,39 +208,52 @@ function App() {
 
   async function createGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !user) return;
+    if (!supabase || !user || isCreatingGroup) return;
     const form = new FormData(event.currentTarget);
     const name = String(form.get('name') ?? '').trim();
     const area = String(form.get('area') ?? '').trim();
     if (!name || !area) return;
 
-    const groupId = crypto.randomUUID();
-    const createdAt = new Date().toISOString();
-    const group: GroupRow = {
-      id: groupId,
-      name,
-      area,
-      created_by: user.id,
-      created_at: createdAt,
-    };
-    const { error } = await supabase
-      .from('groups')
-      .insert({ id: groupId, name, area, created_by: user.id, created_at: createdAt });
-    if (error) {
-      setStatus(error.message);
+    const normalizedKey = `${normalizeName(name)}:${normalizeName(area)}`;
+    const duplicate = groups.some((group) => normalizeName(group.name) === normalizeName(name) && normalizeName(group.area) === normalizeName(area));
+    if (duplicate || recentGroupCreationKey === normalizedKey) {
+      setStatus('同じグループがすでにあります');
+      setToast('同じグループがすでにあります');
       return;
     }
 
-    const { error: memberError } = await supabase.from('group_members').insert({ group_id: group.id, user_id: user.id, role: 'owner' });
-    if (memberError) {
-      setStatus(memberError.message);
-      return;
-    }
+    setIsCreatingGroup(true);
+    setRecentGroupCreationKey(normalizedKey);
+    setStatus('共有グループを作成中です');
 
-    event.currentTarget.reset();
-    setGroups((current) => [...current, group]);
-    setActiveGroupId(group.id);
-    setStatus('グループを作成しました');
+    try {
+      const groupId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const { error } = await supabase
+        .from('groups')
+        .insert({ id: groupId, name, area, created_by: user.id, created_at: createdAt });
+      if (error) throw error;
+
+      const { error: memberError } = await supabase.from('group_members').insert({ group_id: groupId, user_id: user.id, role: 'owner' });
+      if (memberError) throw memberError;
+
+      event.currentTarget.reset();
+      setActiveGroupId(groupId);
+      await loadAccount(user);
+      setToast('共有グループを作成しました');
+      setStatus('共有グループを作成しました');
+    } catch (error) {
+      console.error('[price-memo] failed to create group', error);
+      const message = error instanceof Error ? error.message : '共有グループの作成に失敗しました';
+      setStatus(message);
+      setToast('共有グループの作成に失敗しました');
+      setRecentGroupCreationKey('');
+    } finally {
+      setIsCreatingGroup(false);
+      window.setTimeout(() => {
+        setRecentGroupCreationKey((current) => (current === normalizedKey ? '' : current));
+      }, 30000);
+    }
   }
 
   async function updateGroup(group: GroupRow) {
@@ -238,10 +267,29 @@ function App() {
   }
 
   async function deleteGroup(group: GroupRow) {
-    if (!supabase || !window.confirm(`${group.name}を削除しますか？`)) return;
-    const { error } = await supabase.from('groups').delete().eq('id', group.id);
-    if (error) setStatus(error.message);
-    else await loadAccount(session!.user);
+    if (!supabase || !user || deletingGroupIds.includes(group.id)) return;
+    if (!window.confirm(`${group.name}を削除しますか？\n商品・店舗・価格記録もまとめて削除されます。`)) return;
+
+    setDeletingGroupIds((current) => [...current, group.id]);
+    setStatus('共有グループを削除中です');
+    try {
+      const { data, error } = await supabase.from('groups').delete().eq('id', group.id).select('id');
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error('削除対象が見つからないか、削除権限がありません');
+
+      const nextGroupId = groups.find((candidate) => candidate.id !== group.id)?.id ?? '';
+      setActiveGroupId(nextGroupId);
+      await loadAccount(user);
+      setToast('削除しました');
+      setStatus('削除しました');
+    } catch (error) {
+      console.error('[price-memo] failed to delete group', error);
+      const message = error instanceof Error ? error.message : '共有グループの削除に失敗しました';
+      setStatus(`削除失敗: ${message}`);
+      setToast(`削除失敗: ${message}`);
+    } finally {
+      setDeletingGroupIds((current) => current.filter((id) => id !== group.id));
+    }
   }
 
   async function inviteMember(event: FormEvent<HTMLFormElement>) {
@@ -421,17 +469,33 @@ function App() {
         <button className="ghost-button" type="button" onClick={signOut}>ログアウト</button>
       </header>
 
+      {toast && <div className="toast" role="status">{toast}</div>}
+
       <section className="group-band">
         <label htmlFor="active-group">共有グループ</label>
         <div className="group-selector">
-          <select id="active-group" value={activeGroup?.id ?? ''} onChange={(event) => setActiveGroupId(event.target.value)}>
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>{group.name} / {group.area}</option>
-            ))}
+          <select id="active-group" value={selectedGroupId} onChange={(event) => setActiveGroupId(event.target.value)} disabled={groups.length === 0}>
+            {groups.length === 0 ? (
+              <option value="">共有グループなし</option>
+            ) : (
+              groups.map((group) => (
+                <option key={group.id} value={group.id}>{group.name} / {group.area}</option>
+              ))
+            )}
           </select>
           <button className="secondary-button" type="button" onClick={() => setActiveTab('groups')}>管理</button>
         </div>
-        <p>{activeGroup ? `${activeGroup.area} / ${members.length}人で共有` : '共有グループを作成してください'}</p>
+        {groups.length > 0 && (
+          <div className="group-chip-list" aria-label="共有グループ一覧">
+            {groups.map((group) => (
+              <button key={group.id} className={group.id === selectedGroupId ? 'active' : ''} type="button" onClick={() => setActiveGroupId(group.id)}>
+                <span>{group.name}</span>
+                <small>{group.area}</small>
+              </button>
+            ))}
+          </div>
+        )}
+        <p>{groups.length === 0 ? '共有グループを作成してください' : `${activeGroup?.area ?? ''} / ${members.length}人で共有`}</p>
         <p>状態: {status}</p>
       </section>
 
@@ -474,7 +538,7 @@ function App() {
           <StoreManager stores={stores} addStore={addStore} updateStore={updateStore} deleteStore={deleteStore} />
         )}
         {activeTab === 'groups' && (
-          <GroupManager groups={groups} members={members} profiles={profiles} invites={invites} activeGroupId={activeGroup?.id ?? ''} createGroup={createGroup} updateGroup={updateGroup} deleteGroup={deleteGroup} inviteMember={inviteMember} setActiveGroupId={setActiveGroupId} profile={profile} />
+          <GroupManager groups={groups} members={members} profiles={profiles} invites={invites} activeGroupId={selectedGroupId} isCreatingGroup={isCreatingGroup} deletingGroupIds={deletingGroupIds} createGroup={createGroup} updateGroup={updateGroup} deleteGroup={deleteGroup} inviteMember={inviteMember} setActiveGroupId={setActiveGroupId} profile={profile} />
         )}
         {activeTab === 'backup' && (
           <BackupPanel groups={groups.length} products={products.length} stores={stores.length} records={records.length} exportBackup={exportBackup} />
@@ -783,6 +847,8 @@ function GroupManager({
   profiles,
   invites,
   activeGroupId,
+  isCreatingGroup,
+  deletingGroupIds,
   createGroup,
   updateGroup,
   deleteGroup,
@@ -794,6 +860,8 @@ function GroupManager({
   profiles: ProfileRow[];
   invites: GroupInviteRow[];
   activeGroupId: string;
+  isCreatingGroup: boolean;
+  deletingGroupIds: string[];
   createGroup: (event: FormEvent<HTMLFormElement>) => void;
   updateGroup: (group: GroupRow) => void;
   deleteGroup: (group: GroupRow) => void;
@@ -805,20 +873,31 @@ function GroupManager({
     <section className="panel">
       <h2>共有グループ</h2>
       <form className="form-grid" onSubmit={createGroup}>
-        <label>グループ名<input name="name" placeholder="京都の生活" required /></label>
-        <label>エリア<input name="area" placeholder="京都市 / 三重県" required /></label>
-        <button type="submit">グループを追加</button>
+        <label>グループ名<input name="name" placeholder="京都の生活" required disabled={isCreatingGroup} /></label>
+        <label>エリア<input name="area" placeholder="京都市 / 三重県" required disabled={isCreatingGroup} /></label>
+        <button className={isCreatingGroup ? 'loading-button' : ''} type="submit" disabled={isCreatingGroup} aria-busy={isCreatingGroup}>
+          {isCreatingGroup && <span className="spinner" aria-hidden="true" />}
+          {isCreatingGroup ? '追加中…' : 'グループを追加'}
+        </button>
       </form>
       <div className="list">
+        {groups.length === 0 && <div className="status-line">共有グループはまだありません。</div>}
         {groups.map((group) => (
           <div className={`group-row ${group.id === activeGroupId ? 'active' : ''}`} key={group.id}>
-            <span onClick={() => setActiveGroupId(group.id)}>
+            <button className="group-select-button" type="button" onClick={() => setActiveGroupId(group.id)}>
               <strong>{group.name}</strong>
               <small>{group.area}</small>
-            </span>
+            </button>
             <div className="row-actions">
               <button className="ghost-button" type="button" onClick={() => updateGroup(group)}>編集</button>
-              <button className="ghost-button" type="button" onClick={() => deleteGroup(group)}>削除</button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => deleteGroup(group)}
+                disabled={deletingGroupIds.includes(group.id)}
+              >
+                {deletingGroupIds.includes(group.id) ? '削除中…' : '削除'}
+              </button>
             </div>
           </div>
         ))}
