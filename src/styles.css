@@ -213,6 +213,18 @@ p {
   grid-template-columns: 1fr;
 }
 
+.auth-switch,
+.chip-list,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auth-switch button {
+  flex: 1 1 120px;
+}
+
 .metric {
   display: grid;
   gap: 4px;
@@ -296,6 +308,11 @@ p {
   font-size: 1.25rem;
 }
 
+.price-row.cheapest {
+  outline: 2px solid #235347;
+  background: #eef5ef;
+}
+
 .row-title {
   font-weight: 800;
 }
@@ -334,6 +351,32 @@ p {
   font-size: 0.9rem;
   font-weight: 700;
   padding: 10px 12px;
+}
+
+.freshness {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.freshness.fresh {
+  background: #dcefe0;
+  color: #235347;
+}
+
+.freshness.warm {
+  background: #fff1c9;
+  color: #775500;
+}
+
+.freshness.old {
+  background: #f7d7cf;
+  color: #8a2d1a;
+}
+
+.group-row .row-actions {
+  justify-content: flex-end;
 }
 
 .empty-state {

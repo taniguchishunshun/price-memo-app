@@ -32,6 +32,24 @@ pnpm dev
 
 ブラウザで表示されたURLを開いてください。通常は `http://localhost:5173/` です。
 
+## Supabaseセットアップ
+
+1. SupabaseのSQL Editorで [supabase/schema.sql](supabase/schema.sql) を実行します。
+2. `.env.example` を参考に `.env` を作成します。
+
+```bash
+VITE_SUPABASE_URL=https://shhvdacygqxlzvqqagkk.supabase.co
+VITE_SUPABASE_ANON_KEY=Supabaseのanon key
+```
+
+3. GitHub Pagesで公開する場合は、GitHubリポジトリの `Settings > Secrets and variables > Actions` に以下を登録します。
+
+```text
+VITE_SUPABASE_ANON_KEY
+```
+
+anon keyは公開フロントエンドで使う前提のキーですが、リポジトリには直接コミットしないでください。データ保護はSupabaseのRLSで行います。
+
 ## ビルド
 
 ```bash

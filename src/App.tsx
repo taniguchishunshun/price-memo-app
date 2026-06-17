@@ -1,63 +1,18 @@
-import { ChangeEvent, FormEvent, useMemo, useRef, useState } from 'react';
-import { useLocalStorage } from './hooks/useLocalStorage';
-import type { ActiveTab, AppBackup, Item, PriceRecord, SharedGroup, Store } from './types';
-import {
-  averageNormalPrice,
-  createId,
-  currency,
-  discountAmount,
-  discountRate,
-  effectivePrice,
-  getItemName,
-  getStoreName,
-  isSaleActive,
-  minByPrice,
-  newestRecordByStore,
-  todayString,
-} from './utils/pricing';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import type { Session, User } from '@supabase/supabase-js';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import type {
+  GroupInviteRow,
+  GroupMemberRow,
+  GroupRow,
+  PriceRecordRow,
+  ProductRow,
+  ProfileRow,
+  StoreRow,
+} from './db/database.types';
+import { currency } from './utils/pricing';
 
-const defaultGroupId = 'group_kyoto_partner';
-
-const initialGroups: SharedGroup[] = [
-  { id: defaultGroupId, name: '京都の生活', area: '京都市', sharedWith: '彼女' },
-  { id: 'group_mie_family', name: '三重の実家', area: '三重県', sharedWith: '実家の家族' },
-];
-
-const initialItems: Item[] = [
-  { id: 'item_milk', groupId: defaultGroupId, name: '牛乳', category: '食品', amount: '1000ml' },
-  { id: 'item_eggs', groupId: defaultGroupId, name: '卵', category: '食品', amount: '10個' },
-  { id: 'item_rice', groupId: defaultGroupId, name: '米', category: '主食', amount: '5kg' },
-  { id: 'item_detergent', groupId: defaultGroupId, name: '洗剤', category: '日用品', amount: '800ml' },
-];
-
-const initialStores: Store[] = [
-  { id: 'store_super', groupId: defaultGroupId, name: '駅前スーパー', type: 'スーパー' },
-  { id: 'store_drug', groupId: defaultGroupId, name: 'みどり薬局', type: 'ドラッグストア' },
-];
-
-const initialRecords: PriceRecord[] = [
-  {
-    id: 'record_milk_super',
-    groupId: defaultGroupId,
-    itemId: 'item_milk',
-    storeId: 'store_super',
-    normalPrice: 238,
-    salePrice: 218,
-    saleStart: todayString(),
-    saleEnd: '',
-    recordedAt: todayString(),
-    memo: '週末セール',
-  },
-  {
-    id: 'record_milk_drug',
-    groupId: defaultGroupId,
-    itemId: 'item_milk',
-    storeId: 'store_drug',
-    normalPrice: 248,
-    recordedAt: todayString(),
-    memo: '',
-  },
-];
+type ActiveTab = 'dashboard' | 'records' | 'compare' | 'history' | 'items' | 'stores' | 'groups' | 'backup';
 
 const tabs: { id: ActiveTab; label: string }[] = [
   { id: 'dashboard', label: 'ホーム' },
@@ -71,123 +26,354 @@ const tabs: { id: ActiveTab; label: string }[] = [
 ];
 
 function App() {
-  const [groups, setGroups] = useLocalStorage<SharedGroup[]>('price-tracker-groups', initialGroups);
-  const [activeGroupId, setActiveGroupId] = useLocalStorage<string>('price-tracker-active-group', defaultGroupId);
-  const [items, setItems] = useLocalStorage<Item[]>('price-tracker-items', initialItems);
-  const [stores, setStores] = useLocalStorage<Store[]>('price-tracker-stores', initialStores);
-  const [records, setRecords] = useLocalStorage<PriceRecord[]>('price-tracker-records', initialRecords);
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [members, setMembers] = useState<GroupMemberRow[]>([]);
+  const [invites, setInvites] = useState<GroupInviteRow[]>([]);
+  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [products, setProducts] = useState<ProductRow[]>([]);
+  const [stores, setStores] = useState<StoreRow[]>([]);
+  const [records, setRecords] = useState<PriceRecordRow[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState('');
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [search, setSearch] = useState('');
-  const [selectedItemId, setSelectedItemId] = useState(initialItems[0]?.id ?? '');
-  const [backupMessage, setBackupMessage] = useState('未作成');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [status, setStatus] = useState('準備中');
 
-  const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? initialGroups[0];
-  const activeItems = useMemo(
-    () => items.filter((item) => getGroupId(item) === activeGroup.id),
-    [activeGroup.id, items],
-  );
-  const activeStores = useMemo(
-    () => stores.filter((store) => getGroupId(store) === activeGroup.id),
-    [activeGroup.id, stores],
-  );
-  const activeRecords = useMemo(
-    () => records.filter((record) => getGroupId(record) === activeGroup.id),
-    [activeGroup.id, records],
-  );
-
-  const filteredItems = useMemo(() => {
+  const user = session?.user ?? null;
+  const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null;
+  const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return activeItems;
-    return activeItems.filter((item) =>
-      `${item.name} ${item.category} ${item.amount}`.toLowerCase().includes(keyword),
+    if (!keyword) return products;
+    return products.filter((product) =>
+      `${product.name} ${product.category ?? ''} ${product.amount ?? ''} ${product.barcode ?? ''}`.toLowerCase().includes(keyword),
     );
-  }, [activeItems, search]);
+  }, [products, search]);
+  const selectedProduct = products.find((product) => product.id === selectedProductId) ?? products[0] ?? null;
 
-  const selectedItem = activeItems.find((item) => item.id === selectedItemId) ?? activeItems[0];
+  useEffect(() => {
+    if (!supabase) return;
 
-  function addItem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const nextItem: Item = {
-      id: createId('item'),
-      groupId: activeGroup.id,
-      name: String(form.get('name') ?? '').trim(),
-      category: String(form.get('category') ?? '').trim(),
-      amount: String(form.get('amount') ?? '').trim(),
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      resetData();
+      return;
+    }
+
+    loadAccount(user);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!supabase || !user || !activeGroupId) return;
+    const client = supabase;
+
+    loadGroupData(activeGroupId);
+    const channel = client
+      .channel(`group:${activeGroupId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products', filter: `group_id=eq.${activeGroupId}` }, () => loadGroupData(activeGroupId))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores', filter: `group_id=eq.${activeGroupId}` }, () => loadGroupData(activeGroupId))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'price_records', filter: `group_id=eq.${activeGroupId}` }, () => loadGroupData(activeGroupId))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${activeGroupId}` }, () => loadGroupData(activeGroupId))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'group_invites', filter: `group_id=eq.${activeGroupId}` }, () => loadGroupData(activeGroupId))
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
     };
-    if (!nextItem.name) return;
-    setItems((current) => [...current, nextItem]);
-    setSelectedItemId(nextItem.id);
-    event.currentTarget.reset();
+  }, [activeGroupId, user?.id]);
+
+  async function loadAccount(currentUser: User) {
+    if (!supabase) return;
+
+    const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+    setProfile((profileRow as ProfileRow | null) ?? null);
+
+    const { data: groupRows, error } = await supabase.from('groups').select('*').order('created_at', { ascending: true });
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    const typedGroups = (groupRows ?? []) as GroupRow[];
+    setGroups(typedGroups);
+    const nextGroupId = activeGroupId && typedGroups.some((group) => group.id === activeGroupId) ? activeGroupId : typedGroups[0]?.id ?? '';
+    setActiveGroupId(nextGroupId);
+    if (nextGroupId) {
+      await loadGroupData(nextGroupId);
+    } else {
+      setProducts([]);
+      setStores([]);
+      setRecords([]);
+      setStatus('共有グループを作成してください');
+    }
+
+    const { data: inviteRows } = await supabase.from('group_invites').select('*').is('accepted_at', null).order('created_at', { ascending: false });
+    setInvites((inviteRows ?? []) as GroupInviteRow[]);
   }
 
-  function addStore(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const nextStore: Store = {
-      id: createId('store'),
-      groupId: activeGroup.id,
-      name: String(form.get('name') ?? '').trim(),
-      type: String(form.get('type') ?? '').trim() || 'その他',
-    };
-    if (!nextStore.name) return;
-    setStores((current) => [...current, nextStore]);
-    event.currentTarget.reset();
+  async function loadGroupData(groupId: string) {
+    if (!supabase) return;
+
+    const [productResult, storeResult, recordResult, memberResult, inviteResult] = await Promise.all([
+      supabase.from('products').select('*').eq('group_id', groupId).order('created_at', { ascending: true }),
+      supabase.from('stores').select('*').eq('group_id', groupId).order('created_at', { ascending: true }),
+      supabase.from('price_records').select('*').eq('group_id', groupId).order('recorded_at', { ascending: false }),
+      supabase.from('group_members').select('*').eq('group_id', groupId).order('created_at', { ascending: true }),
+      supabase.from('group_invites').select('*').eq('group_id', groupId).order('created_at', { ascending: false }),
+    ]);
+
+    if (productResult.error || storeResult.error || recordResult.error) {
+      setStatus(productResult.error?.message ?? storeResult.error?.message ?? recordResult.error?.message ?? '読み込みに失敗しました');
+      return;
+    }
+
+    const typedProducts = (productResult.data ?? []) as ProductRow[];
+    const typedStores = (storeResult.data ?? []) as StoreRow[];
+    const typedRecords = (recordResult.data ?? []) as PriceRecordRow[];
+    const typedMembers = (memberResult.data ?? []) as GroupMemberRow[];
+    const typedInvites = (inviteResult.data ?? []) as GroupInviteRow[];
+    setProducts(typedProducts);
+    setStores(typedStores);
+    setRecords(typedRecords);
+    setMembers(typedMembers);
+    setInvites(typedInvites);
+    setSelectedProductId((current) => current || typedProducts[0]?.id || '');
+
+    const userIds = Array.from(new Set([...typedRecords.map((record) => record.recorded_by), ...typedMembers.map((member) => member.user_id)]));
+    if (userIds.length > 0) {
+      const { data: profileRows } = await supabase.from('profiles').select('*').in('id', userIds);
+      setProfiles((profileRows ?? []) as ProfileRow[]);
+    } else {
+      setProfiles([]);
+    }
+
+    setStatus('同期済み');
   }
 
-  function addRecord(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const normalPrice = Number(form.get('normalPrice'));
-    const salePriceValue = Number(form.get('salePrice'));
-    // セール価格は未入力でも保存できるよう、正の数値だけを採用します。
-    const nextRecord: PriceRecord = {
-      id: createId('record'),
-      groupId: activeGroup.id,
-      itemId: String(form.get('itemId')),
-      storeId: String(form.get('storeId')),
-      normalPrice,
-      salePrice: salePriceValue > 0 ? salePriceValue : undefined,
-      saleStart: String(form.get('saleStart') ?? ''),
-      saleEnd: String(form.get('saleEnd') ?? ''),
-      recordedAt: String(form.get('recordedAt') ?? todayString()),
-      memo: String(form.get('memo') ?? '').trim(),
-    };
-    if (!nextRecord.itemId || !nextRecord.storeId || !nextRecord.normalPrice) return;
-    setRecords((current) => [nextRecord, ...current]);
-    setSelectedItemId(nextRecord.itemId);
-    setActiveTab('compare');
-    event.currentTarget.reset();
+  function resetData() {
+    setProfile(null);
+    setGroups([]);
+    setMembers([]);
+    setInvites([]);
+    setProfiles([]);
+    setProducts([]);
+    setStores([]);
+    setRecords([]);
+    setActiveGroupId('');
+    setSelectedProductId('');
   }
 
-  function removeRecord(recordId: string) {
-    setRecords((current) => current.filter((record) => record.id !== recordId));
+  async function signOut() {
+    await supabase?.auth.signOut();
   }
 
-  function addGroup(event: FormEvent<HTMLFormElement>) {
+  async function createGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!supabase || !user) return;
     const form = new FormData(event.currentTarget);
-    const nextGroup: SharedGroup = {
-      id: createId('group'),
-      name: String(form.get('name') ?? '').trim(),
-      area: String(form.get('area') ?? '').trim(),
-      sharedWith: String(form.get('sharedWith') ?? '').trim(),
-    };
-    if (!nextGroup.name || !nextGroup.area) return;
-    setGroups((current) => [...current, nextGroup]);
-    setActiveGroupId(nextGroup.id);
-    setSelectedItemId('');
+    const name = String(form.get('name') ?? '').trim();
+    const area = String(form.get('area') ?? '').trim();
+    if (!name || !area) return;
+
+    const { data: groupRow, error } = await supabase
+      .from('groups')
+      .insert({ name, area, created_by: user.id })
+      .select()
+      .single();
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    const group = groupRow as GroupRow;
+    const { error: memberError } = await supabase.from('group_members').insert({ group_id: group.id, user_id: user.id, role: 'owner' });
+    if (memberError) {
+      setStatus(memberError.message);
+      return;
+    }
+
     event.currentTarget.reset();
+    setGroups((current) => [...current, group]);
+    setActiveGroupId(group.id);
+    setStatus('グループを作成しました');
+  }
+
+  async function updateGroup(group: GroupRow) {
+    if (!supabase) return;
+    const name = window.prompt('グループ名', group.name)?.trim();
+    if (!name) return;
+    const area = window.prompt('エリア', group.area)?.trim() ?? group.area;
+    const { error } = await supabase.from('groups').update({ name, area }).eq('id', group.id);
+    if (error) setStatus(error.message);
+    else await loadAccount(session!.user);
+  }
+
+  async function deleteGroup(group: GroupRow) {
+    if (!supabase || !window.confirm(`${group.name}を削除しますか？`)) return;
+    const { error } = await supabase.from('groups').delete().eq('id', group.id);
+    if (error) setStatus(error.message);
+    else await loadAccount(session!.user);
+  }
+
+  async function inviteMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !user || !activeGroup) return;
+    const form = new FormData(event.currentTarget);
+    const invitedEmail = String(form.get('email') ?? '').trim().toLowerCase();
+    if (!invitedEmail) return;
+    const { error } = await supabase.from('group_invites').insert({
+      group_id: activeGroup.id,
+      invited_email: invitedEmail,
+      invited_by: user.id,
+    });
+    if (error) setStatus(error.message);
+    else {
+      event.currentTarget.reset();
+      setStatus('招待を作成しました');
+      await loadGroupData(activeGroup.id);
+    }
+  }
+
+  async function acceptInvite(invite: GroupInviteRow) {
+    if (!supabase || !user) return;
+    const { error: memberError } = await supabase.from('group_members').insert({
+      group_id: invite.group_id,
+      user_id: user.id,
+      role: invite.role,
+    });
+    if (memberError) {
+      setStatus(memberError.message);
+      return;
+    }
+    await supabase.from('group_invites').update({ accepted_by: user.id, accepted_at: new Date().toISOString() }).eq('id', invite.id);
+    await loadAccount(user);
+  }
+
+  async function addProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !activeGroup) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get('name') ?? '').trim();
+    if (!name) return;
+
+    const duplicate = products.some((product) => normalizeName(product.name) === normalizeName(name));
+    if (duplicate && !window.confirm('似た商品名があります。登録しますか？')) return;
+
+    const { error } = await supabase.from('products').insert({
+      group_id: activeGroup.id,
+      name,
+      category: String(form.get('category') ?? '').trim() || null,
+      amount: String(form.get('amount') ?? '').trim() || null,
+      barcode: String(form.get('barcode') ?? '').trim() || null,
+    });
+    if (error) setStatus(error.message);
+    else event.currentTarget.reset();
+  }
+
+  async function updateProduct(product: ProductRow) {
+    if (!supabase) return;
+    const name = window.prompt('商品名', product.name)?.trim();
+    if (!name) return;
+    const category = window.prompt('カテゴリ', product.category ?? '')?.trim() || null;
+    const amount = window.prompt('内容量・容量', product.amount ?? '')?.trim() || null;
+    const { error } = await supabase.from('products').update({ name, category, amount }).eq('id', product.id);
+    if (error) setStatus(error.message);
+  }
+
+  async function deleteProduct(productId: string) {
+    if (!supabase || !window.confirm('商品を削除しますか？')) return;
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) setStatus(error.message);
+  }
+
+  async function addStore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !activeGroup) return;
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get('name') ?? '').trim();
+    if (!name) return;
+    const { error } = await supabase.from('stores').insert({
+      group_id: activeGroup.id,
+      name,
+      store_type: String(form.get('type') ?? '').trim(),
+      address: String(form.get('address') ?? '').trim() || null,
+    });
+    if (error) setStatus(error.message);
+    else event.currentTarget.reset();
+  }
+
+  async function updateStore(store: StoreRow) {
+    if (!supabase) return;
+    const name = window.prompt('店舗名', store.name)?.trim();
+    if (!name) return;
+    const storeType = window.prompt('区分', store.store_type)?.trim() ?? store.store_type;
+    const address = window.prompt('住所', store.address ?? '')?.trim() || null;
+    const { error } = await supabase.from('stores').update({ name, store_type: storeType, address }).eq('id', store.id);
+    if (error) setStatus(error.message);
+  }
+
+  async function deleteStore(storeId: string) {
+    if (!supabase || !window.confirm('店舗を削除しますか？')) return;
+    const { error } = await supabase.from('stores').delete().eq('id', storeId);
+    if (error) setStatus(error.message);
+  }
+
+  async function addRecord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !user || !activeGroup) return;
+    const form = new FormData(event.currentTarget);
+    const productId = String(form.get('productId'));
+    const storeId = String(form.get('storeId'));
+    const price = Number(form.get('price'));
+    if (!productId || !storeId || !price) return;
+    const { error } = await supabase.from('price_records').insert({
+      group_id: activeGroup.id,
+      product_id: productId,
+      store_id: storeId,
+      price,
+      memo: String(form.get('memo') ?? '').trim() || null,
+      recorded_by: user.id,
+      recorded_at: String(form.get('recordedAt') || new Date().toISOString()),
+    });
+    if (error) setStatus(error.message);
+    else {
+      setSelectedProductId(productId);
+      setActiveTab('compare');
+      event.currentTarget.reset();
+    }
+  }
+
+  async function updateRecord(record: PriceRecordRow) {
+    if (!supabase) return;
+    const price = Number(window.prompt('価格', String(record.price)));
+    if (!price) return;
+    const memo = window.prompt('メモ', record.memo ?? '')?.trim() || null;
+    const { error } = await supabase.from('price_records').update({ price, memo }).eq('id', record.id);
+    if (error) setStatus(error.message);
+  }
+
+  async function deleteRecord(recordId: string) {
+    if (!supabase || !window.confirm('価格記録を削除しますか？')) return;
+    const { error } = await supabase.from('price_records').delete().eq('id', recordId);
+    if (error) setStatus(error.message);
   }
 
   function exportBackup() {
-    const backup: AppBackup = {
+    const backup = {
       app: 'price-memo-app',
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
+      activeGroup,
       groups,
-      activeGroupId: activeGroup.id,
-      items,
+      products,
       stores,
       records,
     };
@@ -195,141 +381,88 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `price-memo-backup-${todayString()}.json`;
+    link.download = `price-memo-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
-    setBackupMessage(`${todayString()} に作成`);
+    setStatus('バックアップを作成しました');
   }
 
-  function importBackup(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const backup = JSON.parse(String(reader.result)) as AppBackup;
-        if (!isValidBackup(backup)) throw new Error('invalid backup');
-        if (!window.confirm('現在のデータをバックアップの内容で置き換えます。実行しますか？')) return;
-
-        const restoredGroups = backup.groups?.length ? backup.groups : initialGroups;
-        const restoredGroupId = backup.activeGroupId ?? restoredGroups[0]?.id ?? defaultGroupId;
-        setGroups(restoredGroups);
-        setActiveGroupId(restoredGroupId);
-        setItems(backup.items.map((item) => ({ ...item, groupId: getGroupId(item) })));
-        setStores(backup.stores.map((store) => ({ ...store, groupId: getGroupId(store) })));
-        setRecords(backup.records.map((record) => ({ ...record, groupId: getGroupId(record) })));
-        setSelectedItemId(backup.items.find((item) => getGroupId(item) === restoredGroupId)?.id ?? '');
-        setBackupMessage(`${backup.exportedAt.slice(0, 10)} のバックアップを復元`);
-      } catch {
-        setBackupMessage('復元できませんでした');
-      } finally {
-        event.target.value = '';
-      }
-    };
-    reader.readAsText(file);
-  }
+  if (!isSupabaseConfigured || !supabase) return <SetupNotice />;
+  if (!session) return <AuthPanel />;
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">localStorageで保存</p>
+          <p className="eyebrow">Supabaseで同期</p>
           <h1>近所価格メモ</h1>
         </div>
-        <div className="total-pill">{activeRecords.length}件</div>
+        <button className="ghost-button" type="button" onClick={signOut}>ログアウト</button>
       </header>
 
       <section className="group-band">
         <label htmlFor="active-group">共有グループ</label>
         <div className="group-selector">
-          <select
-            id="active-group"
-            value={activeGroup.id}
-            onChange={(event) => {
-              setActiveGroupId(event.target.value);
-              setSelectedItemId('');
-            }}
-          >
+          <select id="active-group" value={activeGroup?.id ?? ''} onChange={(event) => setActiveGroupId(event.target.value)}>
             {groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.name} / {group.area}
-              </option>
+              <option key={group.id} value={group.id}>{group.name} / {group.area}</option>
             ))}
           </select>
-          <button className="secondary-button" type="button" onClick={() => setActiveTab('groups')}>
-            管理
-          </button>
+          <button className="secondary-button" type="button" onClick={() => setActiveTab('groups')}>管理</button>
         </div>
-        <p>{activeGroup.area} / 共有先: {activeGroup.sharedWith || '未設定'}</p>
+        <p>{activeGroup ? `${activeGroup.area} / ${members.length}人で共有` : '共有グループを作成してください'}</p>
+        <p>状態: {status}</p>
       </section>
+
+      {pendingInvites(invites, session.user.email).length > 0 && (
+        <section className="panel">
+          <h2>招待</h2>
+          <div className="list">
+            {pendingInvites(invites, session.user.email).map((invite) => (
+              <div className="list-row" key={invite.id}>
+                <span>{invite.group_id}</span>
+                <button type="button" onClick={() => acceptInvite(invite)}>参加</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="search-band">
         <label htmlFor="search">商品検索</label>
-        <input
-          id="search"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="牛乳、米、洗剤など"
-        />
+        <input id="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="卵、牛乳、豆腐など" />
       </section>
 
       <main>
         {activeTab === 'dashboard' && (
-          <Dashboard items={filteredItems} stores={activeStores} records={activeRecords} selectItem={setSelectedItemId} />
+          <Dashboard products={filteredProducts} stores={stores} records={records} profiles={profiles} setSelectedProductId={setSelectedProductId} />
         )}
-        {activeTab === 'items' && <ItemManager items={filteredItems} addItem={addItem} />}
-        {activeTab === 'stores' && <StoreManager stores={activeStores} addStore={addStore} />}
         {activeTab === 'records' && (
-          <RecordForm items={activeItems} stores={activeStores} addRecord={addRecord} selectedItemId={selectedItem?.id ?? ''} />
+          <RecordForm products={products} stores={stores} selectedProductId={selectedProduct?.id ?? ''} addRecord={addRecord} />
         )}
         {activeTab === 'compare' && (
-          <Comparison
-            items={activeItems}
-            stores={activeStores}
-            records={activeRecords}
-            selectedItemId={selectedItem?.id ?? ''}
-            setSelectedItemId={setSelectedItemId}
-          />
+          <Comparison products={products} stores={stores} records={records} selectedProductId={selectedProduct?.id ?? ''} setSelectedProductId={setSelectedProductId} />
         )}
         {activeTab === 'history' && (
-          <History
-            items={activeItems}
-            stores={activeStores}
-            records={activeRecords}
-            selectedItemId={selectedItem?.id ?? ''}
-            setSelectedItemId={setSelectedItemId}
-            removeRecord={removeRecord}
-          />
+          <History products={products} stores={stores} records={records} profiles={profiles} selectedProductId={selectedProduct?.id ?? ''} setSelectedProductId={setSelectedProductId} updateRecord={updateRecord} deleteRecord={deleteRecord} />
+        )}
+        {activeTab === 'items' && (
+          <ProductManager products={filteredProducts} addProduct={addProduct} updateProduct={updateProduct} deleteProduct={deleteProduct} />
+        )}
+        {activeTab === 'stores' && (
+          <StoreManager stores={stores} addStore={addStore} updateStore={updateStore} deleteStore={deleteStore} />
         )}
         {activeTab === 'groups' && (
-          <GroupManager
-            groups={groups}
-            activeGroupId={activeGroup.id}
-            addGroup={addGroup}
-            setActiveGroupId={setActiveGroupId}
-          />
+          <GroupManager groups={groups} members={members} profiles={profiles} invites={invites} activeGroupId={activeGroup?.id ?? ''} createGroup={createGroup} updateGroup={updateGroup} deleteGroup={deleteGroup} inviteMember={inviteMember} setActiveGroupId={setActiveGroupId} profile={profile} />
         )}
         {activeTab === 'backup' && (
-          <BackupPanel
-            itemCount={activeItems.length}
-            storeCount={activeStores.length}
-            recordCount={activeRecords.length}
-            backupMessage={backupMessage}
-            exportBackup={exportBackup}
-            importBackup={importBackup}
-          />
+          <BackupPanel groups={groups.length} products={products.length} stores={stores.length} records={records.length} exportBackup={exportBackup} />
         )}
       </main>
 
       <nav className="bottom-nav" aria-label="メインメニュー">
         {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={activeTab === tab.id ? 'active' : ''}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-          >
+          <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} type="button" onClick={() => setActiveTab(tab.id)}>
             {tab.label}
           </button>
         ))}
@@ -338,105 +471,138 @@ function App() {
   );
 }
 
-function getGroupId(record: { groupId?: string }) {
-  return record.groupId ?? defaultGroupId;
-}
-
-function isValidBackup(backup: AppBackup) {
+function SetupNotice() {
   return (
-    backup?.app === 'price-memo-app' &&
-    (backup.version === 1 || backup.version === 2) &&
-    Array.isArray(backup.items) &&
-    Array.isArray(backup.stores) &&
-    Array.isArray(backup.records)
+    <div className="app-shell">
+      <section className="panel">
+        <h1>Supabase設定が必要です</h1>
+        <p>.env に VITE_SUPABASE_URL と VITE_SUPABASE_ANON_KEY を設定してください。</p>
+      </section>
+    </div>
   );
 }
 
-function ItemPicker({
-  items,
-  selectedItemId,
-  onChange,
-}: {
-  items: Item[];
-  selectedItemId: string;
-  onChange: (id: string) => void;
-}) {
+function AuthPanel() {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [message, setMessage] = useState('');
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get('email') ?? '').trim();
+    const password = String(form.get('password') ?? '');
+    const displayName = String(form.get('displayName') ?? '').trim();
+    const result =
+      mode === 'signup'
+        ? await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName || email.split('@')[0] } } })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+    if (result.error) setMessage(result.error.message);
+    else setMessage(mode === 'signup' ? '登録しました。メール確認が必要な場合は受信箱を確認してください。' : 'ログインしました。');
+  }
+
   return (
-    <label>
-      商品
-      <select value={selectedItemId} onChange={(event) => onChange(event.target.value)}>
-        {items.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name}（{item.amount}）
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="app-shell">
+      <section className="panel">
+        <h1>近所価格メモ</h1>
+        <div className="auth-switch">
+          <button className={mode === 'login' ? 'active' : 'secondary-button'} type="button" onClick={() => setMode('login')}>ログイン</button>
+          <button className={mode === 'signup' ? 'active' : 'secondary-button'} type="button" onClick={() => setMode('signup')}>新規登録</button>
+        </div>
+        <form className="form-grid" onSubmit={submit}>
+          {mode === 'signup' && <label>表示名<input name="displayName" placeholder="大石さん" /></label>}
+          <label>メールアドレス<input name="email" type="email" required /></label>
+          <label>パスワード<input name="password" type="password" minLength={6} required /></label>
+          <button type="submit">{mode === 'signup' ? '登録' : 'ログイン'}</button>
+        </form>
+        {message && <div className="status-line">{message}</div>}
+      </section>
+    </div>
   );
 }
 
 function Dashboard({
-  items,
+  products,
   stores,
   records,
-  selectItem,
+  profiles,
+  setSelectedProductId,
 }: {
-  items: Item[];
-  stores: Store[];
-  records: PriceRecord[];
-  selectItem: (id: string) => void;
+  products: ProductRow[];
+  stores: StoreRow[];
+  records: PriceRecordRow[];
+  profiles: ProfileRow[];
+  setSelectedProductId: (id: string) => void;
 }) {
-  if (items.length === 0) return <EmptyState title="商品を登録しましょう" text="よく買う商品を追加すると集計できます。" />;
+  const favoriteProducts = products.filter((product) => product.is_favorite);
+  const recentRecords = [...records].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 8);
 
   return (
     <section className="stack">
-      {items.map((item) => {
-        const itemRecords = records.filter((record) => record.itemId === item.id);
-        // 店舗ごとの最新価格だけで「現在の最安値」を計算します。
-        const latestByStore = newestRecordByStore(records, item.id);
-        const currentCheapest = minByPrice(latestByStore, effectivePrice);
-        const pastCheapest = minByPrice(itemRecords, (record) => Math.min(record.normalPrice, record.salePrice ?? record.normalPrice));
-        const average = averageNormalPrice(itemRecords);
-        const latest = itemRecords.sort((a, b) => b.recordedAt.localeCompare(a.recordedAt))[0];
-        const diff = latest ? latest.normalPrice - average : 0;
-
+      {favoriteProducts.length > 0 && (
+        <article className="summary-card">
+          <h2>お気に入り商品</h2>
+          <div className="chip-list">
+            {favoriteProducts.map((product) => <span className="sale-chip" key={product.id}>☆ {product.name}</span>)}
+          </div>
+        </article>
+      )}
+      {products.map((product) => {
+        const latest = latestRecordsForProduct(records, product.id);
+        const cheapest = latest[0];
         return (
-          <article className="summary-card" key={item.id} onClick={() => selectItem(item.id)}>
+          <article className="summary-card" key={product.id} onClick={() => setSelectedProductId(product.id)}>
             <div className="card-topline">
               <div>
-                <h2>{item.name}</h2>
-                <p>{item.category} / {item.amount}</p>
+                <h2>{product.name}</h2>
+                <p>{product.category ?? '未分類'} / {product.amount ?? '-'}</p>
               </div>
-              {currentCheapest && <strong>{currency.format(effectivePrice(currentCheapest))}</strong>}
+              {cheapest && <strong>{currency.format(cheapest.price)}</strong>}
             </div>
             <div className="metric-grid">
-              <Metric label="最安値店舗" value={currentCheapest ? getStoreName(stores, currentCheapest.storeId) : '未記録'} />
-              <Metric label="過去最安値" value={pastCheapest ? currency.format(Math.min(pastCheapest.normalPrice, pastCheapest.salePrice ?? pastCheapest.normalPrice)) : '-'} />
-              <Metric label="平均との差" value={latest ? `${diff >= 0 ? '+' : ''}${currency.format(diff)}` : '-'} />
-              <Metric label="最近の推移" value={trendLabel(itemRecords)} />
+              <Metric label="最安値店舗" value={cheapest ? storeName(stores, cheapest.store_id) : '未記録'} />
+              <Metric label="鮮度" value={cheapest ? freshnessLabel(cheapest.updated_at) : '-'} />
+              <Metric label="更新者" value={cheapest ? profileName(profiles, cheapest.recorded_by) : '-'} />
+              <Metric label="更新" value={cheapest ? relativeTime(cheapest.updated_at) : '-'} />
             </div>
           </article>
         );
       })}
+      {recentRecords.length === 0 && <EmptyState title="価格記録がありません" text="商品・店舗・価格を登録してください。" />}
     </section>
   );
 }
 
-function ItemManager({ items, addItem }: { items: Item[]; addItem: (event: FormEvent<HTMLFormElement>) => void }) {
+function ProductManager({
+  products,
+  addProduct,
+  updateProduct,
+  deleteProduct,
+}: {
+  products: ProductRow[];
+  addProduct: (event: FormEvent<HTMLFormElement>) => void;
+  updateProduct: (product: ProductRow) => void;
+  deleteProduct: (id: string) => void;
+}) {
   return (
     <section className="panel">
       <h2>商品登録</h2>
-      <form className="form-grid" onSubmit={addItem}>
-        <label>商品名<input name="name" placeholder="牛乳" required /></label>
+      <form className="form-grid" onSubmit={addProduct}>
+        <label>商品名<input name="name" placeholder="卵 Mサイズ" required /></label>
         <label>カテゴリ<input name="category" placeholder="食品" /></label>
-        <label>内容量・容量<input name="amount" placeholder="1000ml" /></label>
+        <label>内容量・容量<input name="amount" placeholder="10個" /></label>
+        <label>バーコード<input name="barcode" inputMode="numeric" placeholder="任意" /></label>
         <button type="submit">商品を追加</button>
       </form>
       <div className="list">
-        {items.map((item) => (
-          <div className="list-row" key={item.id}>
-            <div><strong>{item.name}</strong><span>{item.category}</span></div>
-            <span>{item.amount}</span>
+        {products.map((product) => (
+          <div className="list-row" key={product.id}>
+            <div><strong>{product.name}</strong><span>{product.category ?? '未分類'} / {product.amount ?? '-'}</span></div>
+            <div className="row-actions">
+              <button className="ghost-button" type="button" onClick={() => updateProduct(product)}>編集</button>
+              <button className="ghost-button" type="button" onClick={() => deleteProduct(product.id)}>削除</button>
+            </div>
           </div>
         ))}
       </div>
@@ -444,21 +610,146 @@ function ItemManager({ items, addItem }: { items: Item[]; addItem: (event: FormE
   );
 }
 
-function StoreManager({ stores, addStore }: { stores: Store[]; addStore: (event: FormEvent<HTMLFormElement>) => void }) {
+function StoreManager({
+  stores,
+  addStore,
+  updateStore,
+  deleteStore,
+}: {
+  stores: StoreRow[];
+  addStore: (event: FormEvent<HTMLFormElement>) => void;
+  updateStore: (store: StoreRow) => void;
+  deleteStore: (id: string) => void;
+}) {
   return (
     <section className="panel">
       <h2>店舗登録</h2>
       <form className="form-grid" onSubmit={addStore}>
-        <label>店舗名<input name="name" placeholder="駅前スーパー" required /></label>
+        <label>店舗名<input name="name" placeholder="業務スーパー" required /></label>
         <label>区分<input name="type" placeholder="スーパー" /></label>
+        <label className="wide">住所<input name="address" placeholder="将来の地図連携用" /></label>
         <button type="submit">店舗を追加</button>
       </form>
       <div className="list">
         {stores.map((store) => (
           <div className="list-row" key={store.id}>
-            <strong>{store.name}</strong>
-            <span>{store.type}</span>
+            <div><strong>{store.name}</strong><span>{store.store_type || '店舗'} / {store.address ?? '住所未登録'}</span></div>
+            <div className="row-actions">
+              <button className="ghost-button" type="button" onClick={() => updateStore(store)}>編集</button>
+              <button className="ghost-button" type="button" onClick={() => deleteStore(store.id)}>削除</button>
+            </div>
           </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecordForm({
+  products,
+  stores,
+  selectedProductId,
+  addRecord,
+}: {
+  products: ProductRow[];
+  stores: StoreRow[];
+  selectedProductId: string;
+  addRecord: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  if (products.length === 0 || stores.length === 0) {
+    return <EmptyState title="商品と店舗が必要です" text="先に商品と店舗を登録してください。" />;
+  }
+
+  return (
+    <section className="panel">
+      <h2>価格登録</h2>
+      <form className="form-grid" onSubmit={addRecord}>
+        <label>商品<select name="productId" defaultValue={selectedProductId}>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
+        <label>店舗<select name="storeId">{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
+        <label>価格<input name="price" type="number" inputMode="numeric" min="1" placeholder="178" required /></label>
+        <label>記録日<input name="recordedAt" type="datetime-local" /></label>
+        <label className="wide">メモ<textarea name="memo" rows={3} placeholder="特売、1人1パックまで、夕方には売り切れなど" /></label>
+        <button type="submit">価格を保存</button>
+      </form>
+    </section>
+  );
+}
+
+function Comparison({
+  products,
+  stores,
+  records,
+  selectedProductId,
+  setSelectedProductId,
+}: {
+  products: ProductRow[];
+  stores: StoreRow[];
+  records: PriceRecordRow[];
+  selectedProductId: string;
+  setSelectedProductId: (id: string) => void;
+}) {
+  const rows = latestRecordsForProduct(records, selectedProductId);
+  return (
+    <section className="panel">
+      <h2>価格比較</h2>
+      <ProductPicker products={products} selectedProductId={selectedProductId} onChange={setSelectedProductId} />
+      <div className="price-table">
+        {rows.map((record, index) => (
+          <article className={`price-row ${index === 0 ? 'cheapest' : ''}`} key={record.id}>
+            <div>
+              <h3>{storeName(stores, record.store_id)}</h3>
+              <p>{freshnessLabel(record.updated_at)} / {relativeTime(record.updated_at)}</p>
+            </div>
+            <div className="price-stack"><strong>{currency.format(record.price)}</strong>{record.memo && <span>{record.memo}</span>}</div>
+          </article>
+        ))}
+      </div>
+      {rows.length === 0 && <EmptyState title="価格がありません" text="価格登録から記録してください。" />}
+    </section>
+  );
+}
+
+function History({
+  products,
+  stores,
+  records,
+  profiles,
+  selectedProductId,
+  setSelectedProductId,
+  updateRecord,
+  deleteRecord,
+}: {
+  products: ProductRow[];
+  stores: StoreRow[];
+  records: PriceRecordRow[];
+  profiles: ProfileRow[];
+  selectedProductId: string;
+  setSelectedProductId: (id: string) => void;
+  updateRecord: (record: PriceRecordRow) => void;
+  deleteRecord: (id: string) => void;
+}) {
+  const history = records.filter((record) => record.product_id === selectedProductId);
+  return (
+    <section className="panel">
+      <h2>価格履歴</h2>
+      <ProductPicker products={products} selectedProductId={selectedProductId} onChange={setSelectedProductId} />
+      <div className="timeline">
+        {history.map((record) => (
+          <article className="history-row" key={record.id}>
+            <div>
+              <div className="row-title">{storeName(stores, record.store_id)} / {currency.format(record.price)}</div>
+              <div className="row-prices">
+                <span>{relativeTime(record.updated_at)}更新</span>
+                <span className={`freshness ${freshnessLevel(record.updated_at)}`}>{freshnessLabel(record.updated_at)}</span>
+              </div>
+              <p>{profileName(profiles, record.recorded_by)}が登録</p>
+              {record.memo && <p>{record.memo}</p>}
+            </div>
+            <div className="row-actions">
+              <button className="ghost-button" type="button" onClick={() => updateRecord(record)}>編集</button>
+              <button className="ghost-button" type="button" onClick={() => deleteRecord(record.id)}>削除</button>
+            </div>
+          </article>
         ))}
       </div>
     </section>
@@ -467,221 +758,112 @@ function StoreManager({ stores, addStore }: { stores: Store[]; addStore: (event:
 
 function GroupManager({
   groups,
+  members,
+  profiles,
+  invites,
   activeGroupId,
-  addGroup,
+  createGroup,
+  updateGroup,
+  deleteGroup,
+  inviteMember,
   setActiveGroupId,
 }: {
-  groups: SharedGroup[];
+  groups: GroupRow[];
+  members: GroupMemberRow[];
+  profiles: ProfileRow[];
+  invites: GroupInviteRow[];
   activeGroupId: string;
-  addGroup: (event: FormEvent<HTMLFormElement>) => void;
+  createGroup: (event: FormEvent<HTMLFormElement>) => void;
+  updateGroup: (group: GroupRow) => void;
+  deleteGroup: (group: GroupRow) => void;
+  inviteMember: (event: FormEvent<HTMLFormElement>) => void;
   setActiveGroupId: (id: string) => void;
+  profile: ProfileRow | null;
 }) {
   return (
     <section className="panel">
       <h2>共有グループ</h2>
-      <form className="form-grid" onSubmit={addGroup}>
+      <form className="form-grid" onSubmit={createGroup}>
         <label>グループ名<input name="name" placeholder="京都の生活" required /></label>
         <label>エリア<input name="area" placeholder="京都市 / 三重県" required /></label>
-        <label className="wide">共有先<input name="sharedWith" placeholder="彼女 / 実家の家族" /></label>
         <button type="submit">グループを追加</button>
       </form>
       <div className="list">
         {groups.map((group) => (
-          <button
-            className={`group-row ${group.id === activeGroupId ? 'active' : ''}`}
-            key={group.id}
-            type="button"
-            onClick={() => setActiveGroupId(group.id)}
-          >
-            <span>
+          <div className={`group-row ${group.id === activeGroupId ? 'active' : ''}`} key={group.id}>
+            <span onClick={() => setActiveGroupId(group.id)}>
               <strong>{group.name}</strong>
               <small>{group.area}</small>
             </span>
-            <em>{group.sharedWith || '共有先未設定'}</em>
-          </button>
+            <div className="row-actions">
+              <button className="ghost-button" type="button" onClick={() => updateGroup(group)}>編集</button>
+              <button className="ghost-button" type="button" onClick={() => deleteGroup(group)}>削除</button>
+            </div>
+          </div>
         ))}
       </div>
+      <h2>メンバー</h2>
+      <div className="list">
+        {members.map((member) => (
+          <div className="list-row" key={member.id}>
+            <strong>{profileName(profiles, member.user_id)}</strong>
+            <span>{member.role}</span>
+          </div>
+        ))}
+      </div>
+      <form className="form-grid" onSubmit={inviteMember}>
+        <label>招待メール<input name="email" type="email" placeholder="family@example.com" required /></label>
+        <button type="submit">招待を作成</button>
+      </form>
+      {invites.length > 0 && (
+        <div className="list">
+          {invites.map((invite) => (
+            <div className="list-row" key={invite.id}>
+              <span>{invite.invited_email}</span>
+              <span>{invite.accepted_at ? '参加済み' : '招待中'}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
 
 function BackupPanel({
-  itemCount,
-  storeCount,
-  recordCount,
-  backupMessage,
+  groups,
+  products,
+  stores,
+  records,
   exportBackup,
-  importBackup,
 }: {
-  itemCount: number;
-  storeCount: number;
-  recordCount: number;
-  backupMessage: string;
+  groups: number;
+  products: number;
+  stores: number;
+  records: number;
   exportBackup: () => void;
-  importBackup: (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   return (
     <section className="panel">
       <h2>データ保管</h2>
       <div className="metric-grid highlight">
-        <Metric label="商品" value={`${itemCount}件`} />
-        <Metric label="店舗" value={`${storeCount}件`} />
-        <Metric label="価格記録" value={`${recordCount}件`} />
+        <Metric label="共有グループ" value={`${groups}件`} />
+        <Metric label="商品" value={`${products}件`} />
+        <Metric label="店舗" value={`${stores}件`} />
+        <Metric label="価格記録" value={`${records}件`} />
       </div>
-      <div className="backup-actions">
-        <button type="button" onClick={exportBackup}>バックアップをダウンロード</button>
-        <button className="secondary-button" type="button" onClick={() => fileInputRef.current?.click()}>
-          バックアップから復元
-        </button>
-        <input ref={fileInputRef} className="file-input" type="file" accept="application/json,.json" onChange={importBackup} />
-      </div>
-      <div className="status-line">状態: {backupMessage}</div>
+      <button type="button" onClick={exportBackup}>バックアップをダウンロード</button>
     </section>
   );
 }
 
-function RecordForm({
-  items,
-  stores,
-  addRecord,
-  selectedItemId,
-}: {
-  items: Item[];
-  stores: Store[];
-  addRecord: (event: FormEvent<HTMLFormElement>) => void;
-  selectedItemId: string;
-}) {
-  if (items.length === 0 || stores.length === 0) {
-    return <EmptyState title="商品と店舗が必要です" text="先に商品と店舗を1件以上登録してください。" />;
-  }
-
+function ProductPicker({ products, selectedProductId, onChange }: { products: ProductRow[]; selectedProductId: string; onChange: (id: string) => void }) {
   return (
-    <section className="panel">
-      <h2>価格登録</h2>
-      <form className="form-grid" onSubmit={addRecord}>
-        <label>
-          商品
-          <select name="itemId" defaultValue={selectedItemId}>
-            {items.map((item) => <option key={item.id} value={item.id}>{item.name}（{item.amount}）</option>)}
-          </select>
-        </label>
-        <label>
-          店舗
-          <select name="storeId">
-            {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
-          </select>
-        </label>
-        <label>通常価格<input name="normalPrice" type="number" inputMode="numeric" min="1" placeholder="238" required /></label>
-        <label>セール価格<input name="salePrice" type="number" inputMode="numeric" min="1" placeholder="任意" /></label>
-        <label>セール開始日<input name="saleStart" type="date" /></label>
-        <label>セール終了日<input name="saleEnd" type="date" /></label>
-        <label>記録日<input name="recordedAt" type="date" defaultValue={todayString()} required /></label>
-        <label className="wide">メモ<textarea name="memo" rows={3} placeholder="チラシ、ポイント還元など" /></label>
-        <button type="submit">価格を保存</button>
-      </form>
-    </section>
-  );
-}
-
-function Comparison({
-  items,
-  stores,
-  records,
-  selectedItemId,
-  setSelectedItemId,
-}: {
-  items: Item[];
-  stores: Store[];
-  records: PriceRecord[];
-  selectedItemId: string;
-  setSelectedItemId: (id: string) => void;
-}) {
-  const latestByStore = newestRecordByStore(records, selectedItemId).sort((a, b) => effectivePrice(a) - effectivePrice(b));
-  const currentMin = minByPrice(latestByStore, effectivePrice);
-  const normalMin = minByPrice(latestByStore, (record) => record.normalPrice);
-  const saleMin = minByPrice(latestByStore.filter((record) => record.salePrice), (record) => record.salePrice);
-
-  return (
-    <section className="panel">
-      <h2>価格比較</h2>
-      <ItemPicker items={items} selectedItemId={selectedItemId} onChange={setSelectedItemId} />
-      <div className="metric-grid highlight">
-        <Metric label="現在の最安値" value={currentMin ? `${getStoreName(stores, currentMin.storeId)} ${currency.format(effectivePrice(currentMin))}` : '-'} />
-        <Metric label="通常価格の最安値" value={normalMin ? `${getStoreName(stores, normalMin.storeId)} ${currency.format(normalMin.normalPrice)}` : '-'} />
-        <Metric label="セール価格の最安値" value={saleMin?.salePrice ? `${getStoreName(stores, saleMin.storeId)} ${currency.format(saleMin.salePrice)}` : '-'} />
-      </div>
-      <div className="price-table">
-        {latestByStore.map((record) => (
-          <PriceRow key={record.id} record={record} storeName={getStoreName(stores, record.storeId)} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function History({
-  items,
-  stores,
-  records,
-  selectedItemId,
-  setSelectedItemId,
-  removeRecord,
-}: {
-  items: Item[];
-  stores: Store[];
-  records: PriceRecord[];
-  selectedItemId: string;
-  setSelectedItemId: (id: string) => void;
-  removeRecord: (id: string) => void;
-}) {
-  const history = records
-    .filter((record) => record.itemId === selectedItemId)
-    .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
-
-  return (
-    <section className="panel">
-      <h2>価格履歴</h2>
-      <ItemPicker items={items} selectedItemId={selectedItemId} onChange={setSelectedItemId} />
-      <div className="timeline">
-        {history.map((record) => (
-          <article className="history-row" key={record.id}>
-            <div>
-              <div className="row-title">{record.recordedAt} / {getStoreName(stores, record.storeId)}</div>
-              <div className="row-prices">
-                <span>通常 {currency.format(record.normalPrice)}</span>
-                {record.salePrice && <span className="sale-chip">セール {currency.format(record.salePrice)}</span>}
-              </div>
-              {record.salePrice && <p>差額 {currency.format(discountAmount(record))} / {discountRate(record)}%引き</p>}
-              {record.memo && <p>{record.memo}</p>}
-            </div>
-            <button className="ghost-button" type="button" onClick={() => removeRecord(record.id)}>削除</button>
-          </article>
-        ))}
-      </div>
-      {history.length === 0 && <EmptyState title="履歴がありません" text={`${getItemName(items, selectedItemId)}の価格を登録してください。`} />}
-    </section>
-  );
-}
-
-function PriceRow({ record, storeName }: { record: PriceRecord; storeName: string }) {
-  return (
-    <article className="price-row">
-      <div>
-        <h3>{storeName}</h3>
-        <p>記録日 {record.recordedAt}</p>
-      </div>
-      <div className="price-stack">
-        <strong>{currency.format(effectivePrice(record))}</strong>
-        <span>通常 {currency.format(record.normalPrice)}</span>
-        {record.salePrice && (
-          <span className="sale-chip">
-            {isSaleActive(record) ? 'セール中' : 'セール'} {currency.format(record.salePrice)} / {discountRate(record)}%引き
-          </span>
-        )}
-      </div>
-    </article>
+    <label>
+      商品
+      <select value={selectedProductId} onChange={(event) => onChange(event.target.value)}>
+        {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+      </select>
+    </label>
   );
 }
 
@@ -703,13 +885,59 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   );
 }
 
-function trendLabel(records: PriceRecord[]) {
-  const sorted = [...records].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt)).slice(0, 2);
-  if (sorted.length < 2) return '記録待ち';
-  const diff = effectivePrice(sorted[0]) - effectivePrice(sorted[1]);
-  if (diff > 0) return `上昇 ${currency.format(diff)}`;
-  if (diff < 0) return `下落 ${currency.format(Math.abs(diff))}`;
-  return '横ばい';
+function latestRecordsForProduct(records: PriceRecordRow[], productId: string) {
+  const latest = new Map<string, PriceRecordRow>();
+  records
+    .filter((record) => record.product_id === productId)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .forEach((record) => {
+      if (!latest.has(record.store_id)) latest.set(record.store_id, record);
+    });
+  return Array.from(latest.values()).sort((a, b) => a.price - b.price);
+}
+
+function storeName(stores: StoreRow[], storeId: string) {
+  return stores.find((store) => store.id === storeId)?.name ?? '未登録の店舗';
+}
+
+function profileName(profiles: ProfileRow[], userId: string) {
+  return profiles.find((profile) => profile.id === userId)?.display_name || 'メンバー';
+}
+
+function pendingInvites(invites: GroupInviteRow[], email?: string) {
+  return invites.filter((invite) => !invite.accepted_at && invite.invited_email === email);
+}
+
+function normalizeName(name: string) {
+  return name
+    .toLowerCase()
+    .replace(/玉子/g, '卵')
+    .replace(/たまご/g, '卵')
+    .replace(/\s+/g, '')
+    .replace(/[ｍmＭ]/g, 'm');
+}
+
+function freshnessLevel(date: string) {
+  const days = (Date.now() - new Date(date).getTime()) / 86_400_000;
+  if (days <= 3) return 'fresh';
+  if (days <= 7) return 'warm';
+  return 'old';
+}
+
+function freshnessLabel(date: string) {
+  const level = freshnessLevel(date);
+  if (level === 'fresh') return '新鮮';
+  if (level === 'warm') return '要確認';
+  return '古い';
+}
+
+function relativeTime(date: string) {
+  const diff = Date.now() - new Date(date).getTime();
+  const minutes = Math.max(1, Math.round(diff / 60_000));
+  if (minutes < 60) return `${minutes}分前`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}時間前`;
+  return `${Math.round(hours / 24)}日前`;
 }
 
 export default App;
