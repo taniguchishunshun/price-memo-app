@@ -1,4 +1,5 @@
-const CACHE_NAME = 'price-memo-app-v3';
+const CACHE_NAME = 'price-memo-app-v4';
+const APP_ORIGIN = self.location.origin;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -18,6 +19,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+
+  if (requestUrl.origin !== APP_ORIGIN || requestUrl.hostname.includes('supabase.co')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
 
   if (event.request.mode === 'navigate') {
     event.respondWith(
@@ -37,6 +44,7 @@ self.addEventListener('fetch', (event) => {
       if (cachedResponse) return cachedResponse;
       return fetch(event.request)
         .then((response) => {
+          if (!response.ok) return response;
           const responseToCache = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
           return response;

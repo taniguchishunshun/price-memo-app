@@ -101,7 +101,7 @@ function App() {
     };
   }, [activeGroupId, user?.id]);
 
-  async function loadAccount(currentUser: User) {
+  async function loadAccount(currentUser: User, preferredGroupId = '') {
     if (!supabase) return;
 
     const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
@@ -131,11 +131,12 @@ function App() {
     const typedGroups = (groupRows ?? []) as GroupRow[];
     console.info('[price-memo] groups loaded', {
       count: typedGroups.length,
-      activeGroupId,
+      activeGroupId: preferredGroupId || activeGroupId,
       groupIds: typedGroups.map((group) => group.id),
     });
     setGroups(typedGroups);
-    const nextGroupId = activeGroupId && typedGroups.some((group) => group.id === activeGroupId) ? activeGroupId : typedGroups[0]?.id ?? '';
+    const candidateGroupId = preferredGroupId || activeGroupId;
+    const nextGroupId = candidateGroupId && typedGroups.some((group) => group.id === candidateGroupId) ? candidateGroupId : typedGroups[0]?.id ?? '';
     setActiveGroupId(nextGroupId);
     if (nextGroupId) {
       await loadGroupData(nextGroupId);
@@ -148,6 +149,11 @@ function App() {
 
     const { data: inviteRows } = await supabase.from('group_invites').select('*').is('accepted_at', null).order('created_at', { ascending: false });
     setInvites((inviteRows ?? []) as GroupInviteRow[]);
+  }
+
+  async function refreshActiveGroupData(groupId = activeGroup?.id ?? activeGroupId) {
+    if (!groupId) return;
+    await loadGroupData(groupId);
   }
 
   async function loadGroupData(groupId: string) {
@@ -239,7 +245,7 @@ function App() {
 
       event.currentTarget.reset();
       setActiveGroupId(groupId);
-      await loadAccount(user);
+      await loadAccount(user, groupId);
       setToast('共有グループを作成しました');
       setStatus('共有グループを作成しました');
     } catch (error) {
@@ -263,7 +269,7 @@ function App() {
     const area = window.prompt('エリア', group.area)?.trim() ?? group.area;
     const { error } = await supabase.from('groups').update({ name, area }).eq('id', group.id);
     if (error) setStatus(error.message);
-    else await loadAccount(session!.user);
+    else await loadAccount(session!.user, group.id);
   }
 
   async function deleteGroup(group: GroupRow) {
@@ -279,7 +285,7 @@ function App() {
 
       const nextGroupId = groups.find((candidate) => candidate.id !== group.id)?.id ?? '';
       setActiveGroupId(nextGroupId);
-      await loadAccount(user);
+      await loadAccount(user, nextGroupId);
       setToast('削除しました');
       setStatus('削除しました');
     } catch (error) {
@@ -344,7 +350,11 @@ function App() {
       barcode: String(form.get('barcode') ?? '').trim() || null,
     });
     if (error) setStatus(error.message);
-    else event.currentTarget.reset();
+    else {
+      event.currentTarget.reset();
+      await refreshActiveGroupData(activeGroup.id);
+      setStatus('商品を追加しました');
+    }
   }
 
   async function updateProduct(product: ProductRow) {
@@ -355,12 +365,21 @@ function App() {
     const amount = window.prompt('内容量・容量', product.amount ?? '')?.trim() || null;
     const { error } = await supabase.from('products').update({ name, category, amount }).eq('id', product.id);
     if (error) setStatus(error.message);
+    else {
+      await refreshActiveGroupData(product.group_id);
+      setStatus('商品を更新しました');
+    }
   }
 
   async function deleteProduct(productId: string) {
     if (!supabase || !window.confirm('商品を削除しますか？')) return;
+    const groupId = products.find((product) => product.id === productId)?.group_id ?? activeGroup?.id ?? '';
     const { error } = await supabase.from('products').delete().eq('id', productId);
     if (error) setStatus(error.message);
+    else {
+      await refreshActiveGroupData(groupId);
+      setStatus('商品を削除しました');
+    }
   }
 
   async function addStore(event: FormEvent<HTMLFormElement>) {
@@ -376,7 +395,11 @@ function App() {
       address: String(form.get('address') ?? '').trim() || null,
     });
     if (error) setStatus(error.message);
-    else event.currentTarget.reset();
+    else {
+      event.currentTarget.reset();
+      await refreshActiveGroupData(activeGroup.id);
+      setStatus('店舗を追加しました');
+    }
   }
 
   async function updateStore(store: StoreRow) {
@@ -387,12 +410,21 @@ function App() {
     const address = window.prompt('住所', store.address ?? '')?.trim() || null;
     const { error } = await supabase.from('stores').update({ name, store_type: storeType, address }).eq('id', store.id);
     if (error) setStatus(error.message);
+    else {
+      await refreshActiveGroupData(store.group_id);
+      setStatus('店舗を更新しました');
+    }
   }
 
   async function deleteStore(storeId: string) {
     if (!supabase || !window.confirm('店舗を削除しますか？')) return;
+    const groupId = stores.find((store) => store.id === storeId)?.group_id ?? activeGroup?.id ?? '';
     const { error } = await supabase.from('stores').delete().eq('id', storeId);
     if (error) setStatus(error.message);
+    else {
+      await refreshActiveGroupData(groupId);
+      setStatus('店舗を削除しました');
+    }
   }
 
   async function addRecord(event: FormEvent<HTMLFormElement>) {
@@ -417,6 +449,8 @@ function App() {
       setSelectedProductId(productId);
       setActiveTab('compare');
       event.currentTarget.reset();
+      await refreshActiveGroupData(activeGroup.id);
+      setStatus('価格を保存しました');
     }
   }
 
@@ -427,12 +461,21 @@ function App() {
     const memo = window.prompt('メモ', record.memo ?? '')?.trim() || null;
     const { error } = await supabase.from('price_records').update({ price, memo }).eq('id', record.id);
     if (error) setStatus(error.message);
+    else {
+      await refreshActiveGroupData(record.group_id);
+      setStatus('価格を更新しました');
+    }
   }
 
   async function deleteRecord(recordId: string) {
     if (!supabase || !window.confirm('価格記録を削除しますか？')) return;
+    const groupId = records.find((record) => record.id === recordId)?.group_id ?? activeGroup?.id ?? '';
     const { error } = await supabase.from('price_records').delete().eq('id', recordId);
     if (error) setStatus(error.message);
+    else {
+      await refreshActiveGroupData(groupId);
+      setStatus('価格記録を削除しました');
+    }
   }
 
   function exportBackup() {
