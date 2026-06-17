@@ -264,6 +264,30 @@ p {
   padding: 0 12px;
 }
 
+.secondary-button {
+  background: #f5efe2;
+  color: #235347;
+  border: 1px solid #b8cabf;
+}
+
+.backup-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.file-input {
+  display: none;
+}
+
+.status-line {
+  border-radius: 8px;
+  background: #f5efe2;
+  color: #5a5143;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
 .empty-state {
   display: grid;
   gap: 8px;
@@ -281,7 +305,7 @@ p {
   left: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 4px;
   border-top: 1px solid #ddd4c4;
   background: rgba(255, 253, 248, 0.96);
@@ -294,7 +318,7 @@ p {
   border-radius: 8px;
   background: transparent;
   color: #4f4639;
-  font-size: clamp(0.68rem, 2.4vw, 0.86rem);
+  font-size: clamp(0.62rem, 2.15vw, 0.82rem);
   padding: 4px;
 }
 
@@ -313,7 +337,8 @@ p {
   }
 
   .form-grid,
-  .metric-grid.highlight {
+  .metric-grid.highlight,
+  .backup-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

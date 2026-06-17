@@ -29,4 +29,14 @@ export type ActiveTab =
   | 'stores'
   | 'records'
   | 'compare'
-  | 'history';
+  | 'history'
+  | 'backup';
+
+export type AppBackup = {
+  app: 'price-memo-app';
+  version: 1;
+  exportedAt: string;
+  items: Item[];
+  stores: Store[];
+  records: PriceRecord[];
+};

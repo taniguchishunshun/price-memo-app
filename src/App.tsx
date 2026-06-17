@@ -1,6 +1,6 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useMemo, useRef, useState } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
-import type { ActiveTab, Item, PriceRecord, Store } from './types';
+import type { ActiveTab, AppBackup, Item, PriceRecord, Store } from './types';
 import {
   averageNormalPrice,
   createId,
@@ -57,6 +57,7 @@ const tabs: { id: ActiveTab; label: string }[] = [
   { id: 'history', label: '履歴' },
   { id: 'items', label: '商品' },
   { id: 'stores', label: '店舗' },
+  { id: 'backup', label: '保存' },
 ];
 
 function App() {
@@ -66,6 +67,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [search, setSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(initialItems[0]?.id ?? '');
+  const [backupMessage, setBackupMessage] = useState('未作成');
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -133,6 +135,50 @@ function App() {
     setRecords((current) => current.filter((record) => record.id !== recordId));
   }
 
+  function exportBackup() {
+    const backup: AppBackup = {
+      app: 'price-memo-app',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      items,
+      stores,
+      records,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `price-memo-backup-${todayString()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setBackupMessage(`${todayString()} に作成`);
+  }
+
+  function importBackup(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const backup = JSON.parse(String(reader.result)) as AppBackup;
+        if (!isValidBackup(backup)) throw new Error('invalid backup');
+        if (!window.confirm('現在のデータをバックアップの内容で置き換えます。実行しますか？')) return;
+
+        setItems(backup.items);
+        setStores(backup.stores);
+        setRecords(backup.records);
+        setSelectedItemId(backup.items[0]?.id ?? '');
+        setBackupMessage(`${backup.exportedAt.slice(0, 10)} のバックアップを復元`);
+      } catch {
+        setBackupMessage('復元できませんでした');
+      } finally {
+        event.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -171,7 +217,7 @@ function App() {
             setSelectedItemId={setSelectedItemId}
           />
         )}
-      {activeTab === 'history' && (
+        {activeTab === 'history' && (
           <History
             items={items}
             stores={stores}
@@ -179,6 +225,16 @@ function App() {
             selectedItemId={selectedItem?.id ?? ''}
             setSelectedItemId={setSelectedItemId}
             removeRecord={removeRecord}
+          />
+        )}
+        {activeTab === 'backup' && (
+          <BackupPanel
+            itemCount={items.length}
+            storeCount={stores.length}
+            recordCount={records.length}
+            backupMessage={backupMessage}
+            exportBackup={exportBackup}
+            importBackup={importBackup}
           />
         )}
       </main>
@@ -196,6 +252,16 @@ function App() {
         ))}
       </nav>
     </div>
+  );
+}
+
+function isValidBackup(backup: AppBackup) {
+  return (
+    backup?.app === 'price-memo-app' &&
+    backup.version === 1 &&
+    Array.isArray(backup.items) &&
+    Array.isArray(backup.stores) &&
+    Array.isArray(backup.records)
   );
 }
 
@@ -308,6 +374,43 @@ function StoreManager({ stores, addStore }: { stores: Store[]; addStore: (event:
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function BackupPanel({
+  itemCount,
+  storeCount,
+  recordCount,
+  backupMessage,
+  exportBackup,
+  importBackup,
+}: {
+  itemCount: number;
+  storeCount: number;
+  recordCount: number;
+  backupMessage: string;
+  exportBackup: () => void;
+  importBackup: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <section className="panel">
+      <h2>データ保管</h2>
+      <div className="metric-grid highlight">
+        <Metric label="商品" value={`${itemCount}件`} />
+        <Metric label="店舗" value={`${storeCount}件`} />
+        <Metric label="価格記録" value={`${recordCount}件`} />
+      </div>
+      <div className="backup-actions">
+        <button type="button" onClick={exportBackup}>バックアップをダウンロード</button>
+        <button className="secondary-button" type="button" onClick={() => fileInputRef.current?.click()}>
+          バックアップから復元
+        </button>
+        <input ref={fileInputRef} className="file-input" type="file" accept="application/json,.json" onChange={importBackup} />
+      </div>
+      <div className="status-line">状態: {backupMessage}</div>
     </section>
   );
 }
