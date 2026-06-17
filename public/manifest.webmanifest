@@ -1,0 +1,19 @@
+{
+  "name": "近所価格メモ",
+  "short_name": "価格メモ",
+  "description": "近所のスーパーや薬局でよく買う商品の価格比較と価格履歴を記録するアプリです。",
+  "start_url": "/price-memo-app/",
+  "scope": "/price-memo-app/",
+  "display": "standalone",
+  "background_color": "#f7f3ea",
+  "theme_color": "#235347",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/price-memo-app/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

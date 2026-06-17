@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="近所価格メモ">
+  <rect width="512" height="512" rx="96" fill="#235347"/>
+  <path d="M132 124h248c19.9 0 36 16.1 36 36v252H96V160c0-19.9 16.1-36 36-36Z" fill="#fffdf8"/>
+  <path d="M126 182h260" stroke="#d8d0c0" stroke-width="18" stroke-linecap="round"/>
+  <path d="M126 252h214" stroke="#d8d0c0" stroke-width="18" stroke-linecap="round"/>
+  <path d="M126 322h172" stroke="#d8d0c0" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="356" cy="330" r="78" fill="#ffe9be"/>
+  <path d="M334 296c8-11 21-18 38-18 23 0 40 14 40 34 0 23-18 34-42 39l-3 1v20" fill="none" stroke="#b13f22" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M367 414h1" stroke="#b13f22" stroke-width="26" stroke-linecap="round"/>
+</svg>

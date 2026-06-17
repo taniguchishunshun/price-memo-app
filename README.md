@@ -37,6 +37,25 @@ pnpm dev
 pnpm build
 ```
 
+## 家族と共有する
+
+GitHub Pagesで公開すると、家族のスマホやPCから以下のURLで開けます。
+
+```text
+https://taniguchishunshun.github.io/price-memo-app/
+```
+
+`main` ブランチへpushすると、GitHub Actionsが自動でビルドしてGitHub Pagesへ反映します。
+
+## iPhoneでアプリのように使う
+
+1. iPhoneのSafariで公開URLを開きます。
+2. 共有ボタンを押します。
+3. 「ホーム画面に追加」を選びます。
+4. ホーム画面の「価格メモ」アイコンから開きます。
+
+データは端末ごとのブラウザに保存されます。家族それぞれの入力内容は自動同期されません。
+
 ## 使い方
 
 1. 「商品」から、牛乳 1000ml、卵 10個、米 5kg などを登録します。
